@@ -244,6 +244,25 @@ class BillingController:
             ).scalar_one()
             is_first_paid = paid_count == 1
 
+        # Notify the doctor their invoice was paid AFTER the payment commits (its
+        # own session, never nested). A replayed receipt short-circuits above
+        # (returns the existing payment) so it never reaches here — no duplicate
+        # notification. A notification failure must NEVER break the payment, which
+        # is already persisted above.
+        if doctor_id is not None:
+            try:
+                from sehaty.core.controllers.notifications import NotificationController
+
+                NotificationController.notify(
+                    doctor_id,
+                    kind="payment_recorded",
+                    message="A cash payment was recorded for your invoice",
+                    entity="invoice",
+                    entity_id=invoice_id,
+                )
+            except Exception:
+                pass
+
         # Settle outside the payment transaction to avoid nesting sessions; the
         # settle is idempotent (only a PENDING referral is ever rewarded).
         if is_first_paid and doctor_id is not None:

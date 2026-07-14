@@ -108,7 +108,24 @@ class ReviewController:
                 )
             )
             session.flush()
-            return review
+            notify_target_id = target_id
+
+        # Notify the rated party AFTER the review commits (its own session, never
+        # nested). A notification failure must NEVER break review creation, which
+        # is already persisted above.
+        try:
+            from sehaty.core.controllers.notifications import NotificationController
+
+            NotificationController.notify(
+                notify_target_id,
+                kind="review_received",
+                message="You received a new review",
+                entity="review",
+                entity_id=review.id,
+            )
+        except Exception:
+            pass
+        return review
 
     @staticmethod
     def reply(user_id: int, review_id: int, text: str) -> Review:
@@ -138,7 +155,24 @@ class ReviewController:
                 )
             )
             session.flush()
-            return review
+            author_id = review.author_id
+
+        # Notify the review author of the reply AFTER it commits (its own session,
+        # never nested). A notification failure must NEVER break the reply, which
+        # is already persisted above.
+        try:
+            from sehaty.core.controllers.notifications import NotificationController
+
+            NotificationController.notify(
+                author_id,
+                kind="review_reply",
+                message="Your review received a reply",
+                entity="review",
+                entity_id=review.id,
+            )
+        except Exception:
+            pass
+        return review
 
     @staticmethod
     def flag(user_id: int, review_id: int) -> Review:
@@ -200,7 +234,26 @@ class ReviewController:
                 )
             )
             session.flush()
-            return review
+            notify_author_id = review.author_id
+
+        # On PUBLISH, notify the author their review is now live — AFTER the
+        # moderation commits (its own session, never nested). REMOVE emits
+        # nothing. A notification failure must NEVER break moderation, which is
+        # already persisted above.
+        if action == "PUBLISH":
+            try:
+                from sehaty.core.controllers.notifications import NotificationController
+
+                NotificationController.notify(
+                    notify_author_id,
+                    kind="review_published",
+                    message="Your review has been published",
+                    entity="review",
+                    entity_id=review.id,
+                )
+            except Exception:
+                pass
+        return review
 
     @staticmethod
     def list_published_for(target_id: int) -> list[Review]:
