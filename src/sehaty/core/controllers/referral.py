@@ -166,6 +166,24 @@ class ReferralController:
                 .where(Referral.id == referral_id)
                 .values(credit_ledger_id=ledger.id)
             )
+
+        # Notify the referrer of the reward AFTER settlement commits (its own
+        # session, never nested). Only reached when a PENDING referral was
+        # actually rewarded (the no-op path returns 0.0 above), so a replayed
+        # receipt never re-notifies. A notification failure must NEVER break
+        # settlement, which is already persisted above.
+        try:
+            from sehaty.core.controllers.notifications import NotificationController
+
+            NotificationController.notify(
+                referrer_id,
+                kind="referral_rewarded",
+                message=f"You earned a {amount:.0f} MAD referral reward",
+                entity="referral",
+                entity_id=referral_id,
+            )
+        except Exception:
+            pass
         return amount
 
     @staticmethod

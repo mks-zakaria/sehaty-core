@@ -76,7 +76,23 @@ class AppointmentController:
                 )
             )
             session.flush()
-            return appt
+
+        # Notify the doctor of the new request AFTER the booking commits (its own
+        # session, never nested). A notification failure must NEVER break the
+        # booking — the appointment is already persisted above.
+        try:
+            from sehaty.core.controllers.notifications import NotificationController
+
+            NotificationController.notify(
+                doctor_id,
+                kind="appointment_booked",
+                message="New appointment requested",
+                entity="appointment",
+                entity_id=appt.id,
+            )
+        except Exception:
+            pass
+        return appt
 
     @staticmethod
     def list_for(user_id: int, role: UserRole) -> list[Appointment]:
@@ -139,4 +155,23 @@ class AppointmentController:
                 )
             )
             session.flush()
-            return appt
+            patient_id = appt.patient_id
+
+        # Notify the patient of the new status AFTER the transition commits (its
+        # own session, never nested). Only a legal transition reaches here — a
+        # raised transition never emits. A notification failure must NEVER break
+        # the transition, which is already persisted above.
+        try:
+            from sehaty.core.controllers.notifications import NotificationController
+
+            human = new_status.value.lower().replace("_", " ")
+            NotificationController.notify(
+                patient_id,
+                kind=f"appointment_{new_status.value.lower()}",
+                message=f"Your appointment is now {human}",
+                entity="appointment",
+                entity_id=appointment_id,
+            )
+        except Exception:
+            pass
+        return appt
