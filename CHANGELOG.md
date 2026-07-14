@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-07-14)
+
+### Features
+
+- Add specialties catalogue (list + idempotent seed)
+  ([#8](https://github.com/mks-zakaria/sehaty-core/pull/8),
+  [`06d11c9`](https://github.com/mks-zakaria/sehaty-core/commit/06d11c9f2e9972816c967f62d9ebb25b15f12763))
+
+
 ## v1.2.0 (2026-07-14)
 
 ### Features
