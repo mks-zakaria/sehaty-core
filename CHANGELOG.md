@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.5.0 (2026-07-14)
+
+### Features
+
+- Add doctor search with geo + reputation ranking
+  ([#12](https://github.com/mks-zakaria/sehaty-core/pull/12),
+  [`741c7cc`](https://github.com/mks-zakaria/sehaty-core/commit/741c7ccfa5e91fa20e6bd893428bb36a6c2dd9de))
+
+
 ## v1.4.0 (2026-07-14)
 
 ### Features
