@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.15.0 (2026-07-14)
+
+### Features
+
+- Add admin-configurable ranking weights and feature flags; search reads them live
+  ([#32](https://github.com/mks-zakaria/sehaty-core/pull/32),
+  [`6e36a14`](https://github.com/mks-zakaria/sehaty-core/commit/6e36a1415730358761cfd88051844143c2cf16cf))
+
+
 ## v1.14.0 (2026-07-14)
 
 ### Features
