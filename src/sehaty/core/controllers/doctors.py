@@ -16,6 +16,7 @@ Geo notes (GeoAlchemy2 over the PostGIS ``geopoint`` Geography column):
 
 import re
 from dataclasses import dataclass
+from datetime import date, datetime
 
 from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
@@ -32,6 +33,7 @@ from sqlalchemy import cast, delete, func, select
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 from sehaty.core.services import doctors as doctor_service
+from sehaty.core.services.slots import available_slots
 
 _MAX_LIMIT = 100
 _SRID = 4326
@@ -230,6 +232,30 @@ class DoctorController:
                 for s in specs
             ],
         )
+
+    @staticmethod
+    def get_public_slots(slug: str, from_date: date, to_date: date) -> list[dict[str, datetime]]:
+        """Return the free ``{start_at, end_at}`` slots for a VERIFIED doctor.
+
+        Mirrors ``get_by_slug``'s privacy stance: a PENDING/REJECTED or missing
+        slug raises ``SehatyNotFoundError`` — we never leak the existence of an
+        unverified (or absent) profile. Only the ``user_id`` and
+        ``verification_status`` columns are projected, so the PostGIS
+        ``geopoint`` blob is never loaded (we don't need it, and SQLite cannot
+        compile it). Slot generation reuses the same session.
+        """
+        stmt = select(
+            DoctorProfile.user_id,
+            DoctorProfile.verification_status,
+        ).where(DoctorProfile.slug == slug)
+
+        with get_session() as session:
+            row = session.execute(stmt).one_or_none()
+            if row is None or row.verification_status != VerificationStatus.VERIFIED:
+                raise SehatyNotFoundError(f"no verified doctor for slug {slug!r}")
+            slots = available_slots(session, row.user_id, from_date, to_date)
+
+        return [{"start_at": start, "end_at": end} for start, end in slots]
 
     @staticmethod
     def _unique_slug(session, base_name: str) -> str:

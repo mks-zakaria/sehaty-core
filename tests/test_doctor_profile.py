@@ -7,8 +7,17 @@ reachable. The pure-logic SQLite suites (``test_admin``/``test_auth``/…) are
 untouched and keep running everywhere.
 """
 
+from datetime import UTC, date, datetime, time
+
 import pytest
-from sehaty.db import DoctorProfile, Specialty, User, UserRole, VerificationStatus
+from sehaty.db import (
+    Availability,
+    DoctorProfile,
+    Specialty,
+    User,
+    UserRole,
+    VerificationStatus,
+)
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -153,6 +162,44 @@ def test_get_by_slug_unverified_not_found(pg_session: Session) -> None:
 def test_get_by_slug_missing_not_found(pg_session: Session) -> None:
     with pytest.raises(SehatyNotFoundError):
         DoctorController.get_by_slug("nobody-here")
+
+
+_MONDAY = date(2026, 8, 3)
+assert _MONDAY.weekday() == 0
+
+
+def test_get_public_slots_returns_slots_for_verified(pg_session: Session) -> None:
+    uid = _make_doctor(pg_session, "slots@clinic.ma")
+    slug = DoctorController.upsert_profile(uid, full_name="Dr Slots")
+    _verify(pg_session, uid)
+    # Monday 09:00-11:00, 30-min slots -> 4 bookable slots.
+    pg_session.add(
+        Availability(
+            doctor_id=uid,
+            weekday=_MONDAY.weekday(),
+            start_time=time(9, 0),
+            end_time=time(11, 0),
+            slot_minutes=30,
+        )
+    )
+    pg_session.commit()
+
+    slots = DoctorController.get_public_slots(slug, _MONDAY, _MONDAY)
+
+    assert len(slots) == 4
+    assert slots[0] == {
+        "start_at": datetime(2026, 8, 3, 9, 0, tzinfo=UTC),
+        "end_at": datetime(2026, 8, 3, 9, 30, tzinfo=UTC),
+    }
+
+
+def test_get_public_slots_pending_not_found(pg_session: Session) -> None:
+    uid = _make_doctor(pg_session, "pendingslots@clinic.ma")
+    slug = DoctorController.upsert_profile(uid, full_name="Dr Pending Slots")
+
+    # PENDING profile is never surfaced publicly (no existence leak).
+    with pytest.raises(SehatyNotFoundError):
+        DoctorController.get_public_slots(slug, _MONDAY, _MONDAY)
 
 
 def test_upsert_non_doctor_raises(pg_session: Session) -> None:
