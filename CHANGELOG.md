@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.0 (2026-07-14)
+
+### Features
+
+- Emit in-app notifications on booking, reviews, payments, and referrals
+  ([#30](https://github.com/mks-zakaria/sehaty-core/pull/30),
+  [`ec58b16`](https://github.com/mks-zakaria/sehaty-core/commit/ec58b16cb0f648d6f8864cf94c494b4c000c36f2))
+
+
 ## v1.13.0 (2026-07-14)
 
 ### Features
