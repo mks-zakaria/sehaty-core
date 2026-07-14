@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.8.0 (2026-07-14)
+
+### Features
+
+- Expose doctor id in public doctor view ([#18](https://github.com/mks-zakaria/sehaty-core/pull/18),
+  [`3420ecc`](https://github.com/mks-zakaria/sehaty-core/commit/3420eccdfbf1210a1ed0daeb78350558a86cd8ec))
+
+
 ## v1.7.0 (2026-07-14)
 
 ### Features
