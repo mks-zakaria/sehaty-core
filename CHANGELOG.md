@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.12.0 (2026-07-14)
+
+### Features
+
+- Add in-app notifications (create, feed, unread count, mark read)
+  ([#26](https://github.com/mks-zakaria/sehaty-core/pull/26),
+  [`0cc178c`](https://github.com/mks-zakaria/sehaty-core/commit/0cc178c1a317a60652123a4b926a13a5cb638c96))
+
+
 ## v1.11.0 (2026-07-14)
 
 ### Features
