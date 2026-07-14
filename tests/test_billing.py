@@ -3,20 +3,24 @@
 Covers plan seeding idempotency, subscribing, invoice generation with credit
 offset, idempotent cash-receipt recording, and the dunning sweep. Only the
 tables this feature touches (users, plans, subscriptions, invoices, payments,
-credit_ledger, audit_logs) are created — none carry the PostGIS ``geopoint``
-column, so no dialect shims are needed.
+credit_ledger, audit_logs, plus referrals + admin_config, which
+``record_cash_payment`` reads when settling a first-paid-invoice referral) are
+created — none carry the PostGIS ``geopoint`` column, so no dialect shims are
+needed.
 """
 
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sehaty.db import (
+    AdminConfig,
     AuditLog,
     CreditLedger,
     Invoice,
     InvoiceStatus,
     Payment,
     Plan,
+    Referral,
     Subscription,
     SubscriptionStatus,
     User,
@@ -39,6 +43,10 @@ _TABLES = [
     Payment.__table__,
     CreditLedger.__table__,
     AuditLog.__table__,
+    # record_cash_payment settles referrals on the first paid invoice, so it
+    # reads these tables (there are simply no referrals in the billing suite).
+    Referral.__table__,
+    AdminConfig.__table__,
 ]
 
 _NOW = datetime(2026, 7, 13, 10, 0, tzinfo=UTC)

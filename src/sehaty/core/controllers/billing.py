@@ -187,7 +187,14 @@ class BillingController:
         (stamping ``paid_at``), and writes a ``PAYMENT_CASH`` audit entry. A
         non-admin actor is ``SehatyForbiddenError``; a missing invoice is
         ``SehatyNotFoundError``.
+
+        When this receipt is the doctor's *first* paid invoice, a pending
+        referral (if any) is settled — crediting the referrer. That settlement
+        is itself idempotent, and replaying a receipt short-circuits above, so a
+        referrer is never double-rewarded.
         """
+        is_first_paid = False
+        doctor_id: int | None = None
         with get_session() as session:
             actor_role = session.execute(
                 select(User.role).where(User.id == admin_id)
@@ -215,6 +222,7 @@ class BillingController:
             session.add(payment)
             invoice.status = InvoiceStatus.PAID
             invoice.paid_at = paid_at
+            doctor_id = invoice.doctor_id
             session.flush()
             session.add(
                 AuditLog(
@@ -225,7 +233,24 @@ class BillingController:
                 )
             )
             session.flush()
-            return payment
+            # First paid invoice for this doctor? (== 1 counting the one above.)
+            paid_count = session.execute(
+                select(func.count())
+                .select_from(Invoice)
+                .where(
+                    Invoice.doctor_id == doctor_id,
+                    Invoice.status == InvoiceStatus.PAID,
+                )
+            ).scalar_one()
+            is_first_paid = paid_count == 1
+
+        # Settle outside the payment transaction to avoid nesting sessions; the
+        # settle is idempotent (only a PENDING referral is ever rewarded).
+        if is_first_paid and doctor_id is not None:
+            from sehaty.core.controllers.referral import ReferralController
+
+            ReferralController.settle_first_payment(doctor_id)
+        return payment
 
     @staticmethod
     def apply_credit(
