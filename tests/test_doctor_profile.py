@@ -72,6 +72,7 @@ def test_upsert_persists_point_and_roundtrips(pg_session: Session) -> None:
         lat=_LAT,
         lng=_LNG,
         consultation_fee=350.0,
+        languages=["ar", "fr"],
     )
     _verify(pg_session, uid)
 
@@ -87,6 +88,8 @@ def test_upsert_persists_point_and_roundtrips(pg_session: Session) -> None:
     # The point survives the geography round-trip within float tolerance.
     assert view.lat == pytest.approx(_LAT, abs=_EPS)
     assert view.lng == pytest.approx(_LNG, abs=_EPS)
+    # Spoken languages are persisted and surfaced by the public view.
+    assert view.languages == ["ar", "fr"]
 
 
 def test_slug_unique_across_same_name(pg_session: Session) -> None:
