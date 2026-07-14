@@ -56,8 +56,12 @@ class DoctorView:
     The raw PostGIS ``geopoint`` is never exposed: coordinates arrive as plain
     ``lat``/``lng`` floats (or ``None``). ``languages`` has no column in the
     current schema, so it is surfaced as an empty list until one lands.
+
+    ``id`` is the doctor's ``user_id`` — the numeric handle the booking flow
+    (``/dr/:slug`` → ``/book``) needs to create an appointment.
     """
 
+    id: int
     slug: str
     full_name: str
     bio: str | None
@@ -211,6 +215,7 @@ class DoctorController:
             ).all()
 
         return DoctorView(
+            id=row.user_id,
             slug=row.slug,
             full_name=row.full_name,
             bio=row.bio,

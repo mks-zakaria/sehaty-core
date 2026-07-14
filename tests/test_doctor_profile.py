@@ -77,6 +77,9 @@ def test_upsert_persists_point_and_roundtrips(pg_session: Session) -> None:
 
     view = DoctorController.get_by_slug(slug)
 
+    # The public view exposes the doctor's numeric user id so the
+    # ``/dr/:slug`` → ``/book`` flow can obtain the booking ``doctor_id``.
+    assert view.id == uid
     assert view.slug == slug
     assert view.full_name == "Dr Amina Bennani"
     assert view.city == "Casablanca"
@@ -126,6 +129,7 @@ def test_specialty_slugs_link_and_replace(pg_session: Session) -> None:
     )
     _verify(pg_session, uid)
     view = DoctorController.get_by_slug("dr-nadia-cherkaoui")
+    assert view.id == uid
     assert {s.slug for s in view.specialties} == {"cardiology", "dermatology"}
 
     # Re-upsert with a different set fully replaces the links.
