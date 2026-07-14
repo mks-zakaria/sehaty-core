@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.9.0 (2026-07-14)
+
+### Features
+
+- Add reviews + reputation (two-way, booking-gated, moderated)
+  ([#20](https://github.com/mks-zakaria/sehaty-core/pull/20),
+  [`dd6ec9b`](https://github.com/mks-zakaria/sehaty-core/commit/dd6ec9b8060b995db1ca4a63503cc47eab127162))
+
+
 ## v1.8.0 (2026-07-14)
 
 ### Features
