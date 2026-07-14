@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.0 (2026-07-14)
+
+### Features
+
+- Add reporting KPIs, revenue summary, and year-end accounting export
+  ([#28](https://github.com/mks-zakaria/sehaty-core/pull/28),
+  [`51c8c4d`](https://github.com/mks-zakaria/sehaty-core/commit/51c8c4de1a0eee215fbd801951d6103d75705d7a))
+
+
 ## v1.12.0 (2026-07-14)
 
 ### Features
