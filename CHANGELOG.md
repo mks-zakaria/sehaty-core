@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.16.0 (2026-07-14)
+
+### Features
+
+- Add admin list_users and list_subscriptions read methods
+  ([#34](https://github.com/mks-zakaria/sehaty-core/pull/34),
+  [`01e0243`](https://github.com/mks-zakaria/sehaty-core/commit/01e0243ddcd48a408dd519c3839905a720920a7a))
+
+
 ## v1.15.0 (2026-07-14)
 
 ### Features
