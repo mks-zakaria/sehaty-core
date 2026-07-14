@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.4.0 (2026-07-14)
+
+### Features
+
+- Add doctor profile with geolocation + specialties
+  ([#10](https://github.com/mks-zakaria/sehaty-core/pull/10),
+  [`98f2c3c`](https://github.com/mks-zakaria/sehaty-core/commit/98f2c3c90190ff516516d2a9996181d6a4a312de))
+
+
 ## v1.3.0 (2026-07-14)
 
 ### Features
