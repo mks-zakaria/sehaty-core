@@ -11,6 +11,8 @@ dynamic = ["version"]
 dependencies = [
     "sqlalchemy>=2.0.36",
     "pydantic>=2.10",
+    "bcrypt>=4.2",
+    "pyjwt>=2.10",
     "sehaty-db",
 ]
 
