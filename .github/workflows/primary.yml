@@ -1,0 +1,34 @@
+name: primary
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sehaty-core
+      # sehaty-core depends on sehaty-db via a local path source
+      # (../sehaty-db), so the schema repo must be checked out alongside
+      # before `uv sync` can resolve it.
+      - uses: actions/checkout@v4
+        with:
+          repository: mks-zakaria/sehaty-db
+          path: sehaty-db
+          token: ${{ secrets.SEHATY_CI_PAT }}
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --all-extras
+        working-directory: sehaty-core
+      - run: uv run ruff check .
+        working-directory: sehaty-core
+      - run: uv run ruff format --check .
+        working-directory: sehaty-core
+      - run: uv run pytest -q
+        working-directory: sehaty-core
+      - run: uv run mypy src
+        working-directory: sehaty-core
+        continue-on-error: true # ratchet to required once clean

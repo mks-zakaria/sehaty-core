@@ -1,0 +1,52 @@
+name: release
+# Merge to main → auto version bump (semantic-release reads Conventional Commits).
+# SEHATY_CI_PAT: checks out the sibling sehaty-db and pushes the "Release vX"
+# commit to protected main (falls back to GITHUB_TOKEN for read-only dispatch).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        type: choice
+        options: [stable, rc]
+        default: stable
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SEHATY_CI_PAT || secrets.GITHUB_TOKEN }}
+          path: sehaty-core
+      - uses: actions/checkout@v4
+        with:
+          repository: mks-zakaria/sehaty-db
+          path: sehaty-db
+          token: ${{ secrets.SEHATY_CI_PAT }}
+      - uses: astral-sh/setup-uv@v3
+      - name: Configure git identity
+        run: |
+          git config user.name "MKS~ZAK"
+          git config user.email "60817481+mks-zakaria@users.noreply.github.com"
+        working-directory: sehaty-core
+      - run: uv sync --all-extras
+        working-directory: sehaty-core
+      - name: semantic-release
+        env:
+          GH_TOKEN: ${{ secrets.SEHATY_CI_PAT || secrets.GITHUB_TOKEN }}
+        working-directory: sehaty-core
+        run: |
+          if [ "${{ github.event.inputs.release_type }}" = "rc" ]; then
+            uv run semantic-release version --no-vcs-release --print
+          else
+            uv run semantic-release version --commit --push --tag
+          fi
