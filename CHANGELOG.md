@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.17.0 (2026-07-14)
+
+### Features
+
+- Persist and return doctor languages ([#36](https://github.com/mks-zakaria/sehaty-core/pull/36),
+  [`be2f36c`](https://github.com/mks-zakaria/sehaty-core/commit/be2f36c92e47d57b1b718093923665c29663740f))
+
+
 ## v1.16.0 (2026-07-14)
 
 ### Features
