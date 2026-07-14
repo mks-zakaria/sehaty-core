@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.11.0 (2026-07-14)
+
+### Features
+
+- Add doctor referral program (code, credit reward on first paid invoice)
+  ([#24](https://github.com/mks-zakaria/sehaty-core/pull/24),
+  [`5fca900`](https://github.com/mks-zakaria/sehaty-core/commit/5fca9008a2bee0bca3b36e25f120ae505bf53ff8))
+
+
 ## v1.10.0 (2026-07-14)
 
 ### Features
