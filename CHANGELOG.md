@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.6.0 (2026-07-14)
+
+### Features
+
+- Add booking core (availability, slots, appointment lifecycle)
+  ([#14](https://github.com/mks-zakaria/sehaty-core/pull/14),
+  [`e81067f`](https://github.com/mks-zakaria/sehaty-core/commit/e81067fc62ab1ef839fd5f7cb4b9e84da6aa0224))
+
+
 ## v1.5.0 (2026-07-14)
 
 ### Features
