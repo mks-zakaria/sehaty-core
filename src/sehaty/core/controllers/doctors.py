@@ -54,8 +54,8 @@ class DoctorView:
     """Public, read-only projection of a doctor's profile.
 
     The raw PostGIS ``geopoint`` is never exposed: coordinates arrive as plain
-    ``lat``/``lng`` floats (or ``None``). ``languages`` has no column in the
-    current schema, so it is surfaced as an empty list until one lands.
+    ``lat``/``lng`` floats (or ``None``). ``languages`` is the doctor's spoken
+    languages (``ar``/``fr``/``en``) read straight off the profile column.
 
     ``id`` is the doctor's ``user_id`` — the numeric handle the booking flow
     (``/dr/:slug`` → ``/book``) needs to create an appointment.
@@ -129,8 +129,9 @@ class DoctorController:
         ``geopoint`` is (re)written only when both ``lat`` and ``lng`` are given.
         ``specialty_slugs`` fully replaces the doctor's specialty links; an
         unknown slug raises ``SehatyValidationError`` (fail loud rather than
-        silently drop a caller's intent). ``languages`` is accepted but not yet
-        persisted (no column in the current schema).
+        silently drop a caller's intent). ``languages`` fully replaces the
+        stored list when given; passing ``None`` on update leaves the existing
+        list untouched (create defaults it to ``[]``).
         """
         if not full_name or not full_name.strip():
             raise SehatyValidationError("full_name is required")
@@ -157,11 +158,16 @@ class DoctorController:
                     # (mirrors the synthetic email trick in AuthController).
                     license_no=f"PENDING-{user_id}",
                     verification_status=VerificationStatus.PENDING,
+                    languages=languages if languages is not None else [],
                 )
                 session.add(profile)
             else:
                 slug = profile.slug  # slug is immutable after first create
                 profile.full_name = full_name
+                # None means "leave as-is" (do not clobber the stored list);
+                # a list (even empty) fully replaces it.
+                if languages is not None:
+                    profile.languages = languages
 
             profile.bio = bio
             profile.photo_url = photo_url
@@ -194,6 +200,7 @@ class DoctorController:
             func.ST_Y(cast(DoctorProfile.geopoint, Geometry)).label("lat"),
             func.ST_X(cast(DoctorProfile.geopoint, Geometry)).label("lng"),
             DoctorProfile.consultation_fee,
+            DoctorProfile.languages,
             DoctorProfile.verification_status,
         ).where(DoctorProfile.slug == slug)
 
@@ -225,7 +232,7 @@ class DoctorController:
             lat=row.lat,
             lng=row.lng,
             consultation_fee=row.consultation_fee,
-            languages=[],
+            languages=list(row.languages or []),
             verification_status=str(row.verification_status),
             specialties=[
                 SpecialtyRef(
