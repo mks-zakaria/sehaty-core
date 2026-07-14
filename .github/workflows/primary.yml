@@ -8,6 +8,23 @@ on:
 jobs:
   lint-test:
     runs-on: ubuntu-latest
+    # PostGIS backs the doctor-profile integration tests (geopoint round-trip).
+    services:
+      postgis:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: sehaty
+          POSTGRES_PASSWORD: sehaty
+          POSTGRES_DB: sehaty
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sehaty"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg://sehaty:sehaty@localhost:5432/sehaty
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,6 +43,10 @@ jobs:
       - run: uv run ruff check .
         working-directory: sehaty-core
       - run: uv run ruff format --check .
+        working-directory: sehaty-core
+      # Apply the schema (sehaty-migrate ships with the sehaty-db dep and reads
+      # DATABASE_URL) so the PostGIS integration tests have their tables.
+      - run: uv run sehaty-migrate
         working-directory: sehaty-core
       - run: uv run pytest -q
         working-directory: sehaty-core
