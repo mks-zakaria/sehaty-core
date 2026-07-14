@@ -14,7 +14,9 @@ from sehaty.core.errors import (
 
 
 def test_packages_import() -> None:
-    assert sehaty.core.__version__ == "0.0.0"
+    # semantic-release rewrites _version.py, so assert a version is exposed
+    # rather than pinning a literal that goes stale on every release.
+    assert isinstance(sehaty.core.__version__, str) and sehaty.core.__version__
     assert hasattr(sehaty.db, "DoctorProfile")
 
 

@@ -30,6 +30,16 @@ def _get_session_factory() -> sessionmaker[Session]:
     return _session_factory
 
 
+def set_session_factory(factory: sessionmaker[Session] | None) -> None:
+    """Override (or reset with ``None``) the process-wide session factory.
+
+    Tests inject a factory bound to an in-memory SQLite engine so controllers
+    run without a live Postgres. Not used in production code paths.
+    """
+    global _session_factory
+    _session_factory = factory
+
+
 @contextmanager
 def get_session() -> Iterator[Session]:
     """Yield a session, committing on success and rolling back on error."""
