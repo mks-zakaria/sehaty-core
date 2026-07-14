@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.7.0 (2026-07-14)
+
+### Features
+
+- Add slug-keyed public slots resolver ([#16](https://github.com/mks-zakaria/sehaty-core/pull/16),
+  [`e47aec0`](https://github.com/mks-zakaria/sehaty-core/commit/e47aec0cf14fe3a128a73142f8871da3d7561183))
+
+
 ## v1.6.0 (2026-07-14)
 
 ### Features
