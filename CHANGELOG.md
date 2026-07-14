@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.10.0 (2026-07-14)
+
+### Features
+
+- Add cash billing (plans 199/299/499, invoices, receipts, dunning)
+  ([#22](https://github.com/mks-zakaria/sehaty-core/pull/22),
+  [`7195fec`](https://github.com/mks-zakaria/sehaty-core/commit/7195fec22a645750a15d6b30b3a622115dad1acb))
+
+
 ## v1.9.0 (2026-07-14)
 
 ### Features
