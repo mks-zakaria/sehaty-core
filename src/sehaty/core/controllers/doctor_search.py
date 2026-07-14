@@ -7,16 +7,18 @@ delegate IO to ``services.doctor_search``, then rank in-process.
 Ranking
 -------
 The DB returns candidates nearest-first; ranking re-orders them by a weighted
-blend of rating, proximity and verification. Weights are admin-tunable via the
-single ``RankingWeights`` row (falling back to sane defaults when unset):
+blend of rating, proximity and verification. Weights are admin-tunable via
+``ConfigController.get_ranking_weights()`` (backed by the single
+``RankingWeights`` row, falling back to sane defaults when unset):
 
     rank = w_rating   * (avg_stars / 5)
          + w_distance * (1 - min(distance_m / radius_m, 1))
          + w_verified * 1.0
 
-Every returned doctor is VERIFIED (filtered in the query), so the verified term
-is a constant ``w_verified`` today; it is kept explicit so a future mixed-trust
-result set ranks correctly without reshaping the formula.
+The pure formula lives in ``score_doctor`` so it can be exercised without a live
+geo database. Every returned doctor is VERIFIED (filtered in the query), so the
+verified term is a constant ``w_verified`` today; it is kept explicit so a
+future mixed-trust result set ranks correctly without reshaping the formula.
 
 TODO(recency): fold in a ``w_recency`` term driven by the doctor's most recent
 completed appointment (freshly-active doctors rank higher). Held at 0 until the
@@ -25,9 +27,7 @@ scheduling read lands so the score stays deterministic.
 
 from dataclasses import dataclass
 
-from sehaty.db import RankingWeights
-from sqlalchemy import select
-
+from sehaty.core.controllers.config import ConfigController, RankingWeightsValues
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyValidationError
 from sehaty.core.services import doctor_search as search_service
@@ -37,11 +37,27 @@ _MAX_LIMIT = 100
 _MIN_RADIUS_M = 1
 _MAX_RADIUS_M = 50_000
 
-# Fallback weights when no RankingWeights row exists (see admin_config defaults).
-_DEFAULT_W_RATING = 1.0
-_DEFAULT_W_DISTANCE = 1.0
-_DEFAULT_W_VERIFIED = 0.5
-_DEFAULT_W_RECENCY = 0.25
+
+def score_doctor(
+    *,
+    avg_stars: float,
+    distance_m: float,
+    radius_m: float,
+    weights: RankingWeightsValues,
+) -> float:
+    """Weighted ranking score for a single VERIFIED doctor hit.
+
+    Pure function of the reputation/proximity inputs and the admin weights, so
+    the ranking maths is unit-testable without touching PostGIS. Higher is
+    better. The verified term is a constant today (every hit is VERIFIED); see
+    the module docstring for the held-at-zero recency term.
+    """
+    return (
+        weights.w_rating * (avg_stars / 5)
+        + weights.w_distance * (1 - min(distance_m / radius_m, 1))
+        + weights.w_verified * 1.0
+        # + weights.w_recency * recency_term  # TODO(recency): see module docstring.
+    )
 
 
 @dataclass(frozen=True)
@@ -96,11 +112,10 @@ class DoctorSearchController:
                 radius_m=radius_m,
                 limit=limit,
             )
-            weights = session.execute(select(RankingWeights)).scalars().first()
 
-        w_rating = weights.w_rating if weights else _DEFAULT_W_RATING
-        w_distance = weights.w_distance if weights else _DEFAULT_W_DISTANCE
-        w_verified = weights.w_verified if weights else _DEFAULT_W_VERIFIED
+        # Admin-tunable weights, fetched once per search; defaults preserve the
+        # historical ranking when no RankingWeights row has been written.
+        weights = ConfigController.get_ranking_weights()
 
         results = [
             DoctorSearchResult(
@@ -113,11 +128,11 @@ class DoctorSearchController:
                 lng=row.lng,
                 avg_stars=row.avg_stars,
                 review_count=row.review_count,
-                rank=(
-                    w_rating * (row.avg_stars / 5)
-                    + w_distance * (1 - min(row.distance_m / radius_m, 1))
-                    + w_verified * 1.0
-                    # + w_recency * recency_term  # TODO(recency): see module docstring.
+                rank=score_doctor(
+                    avg_stars=row.avg_stars,
+                    distance_m=row.distance_m,
+                    radius_m=radius_m,
+                    weights=weights,
                 ),
             )
             for row in rows
