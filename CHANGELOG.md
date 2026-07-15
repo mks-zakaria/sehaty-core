@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.31.0 (2026-07-15)
+
+### Features
+
+- Include doctor slug in assistant's doctor list
+  ([#66](https://github.com/mks-zakaria/sehaty-core/pull/66),
+  [`b8eb4ee`](https://github.com/mks-zakaria/sehaty-core/commit/b8eb4eeda826f7563e3527040d24b7f370ea436a))
+
+
 ## v1.30.0 (2026-07-15)
 
 ### Features
