@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.23.0 (2026-07-15)
+
+### Features
+
+- Patient appointment list with doctor name + patient-scoped prescription detail
+  ([#50](https://github.com/mks-zakaria/sehaty-core/pull/50),
+  [`d110f7b`](https://github.com/mks-zakaria/sehaty-core/commit/d110f7bf47525262825500db40f3cdf58a2b0238))
+
+
 ## v1.22.0 (2026-07-15)
 
 ### Features
