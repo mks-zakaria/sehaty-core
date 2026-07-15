@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.26.0 (2026-07-15)
+
+### Features
+
+- Add appointment reschedule (move to a new free slot)
+  ([#56](https://github.com/mks-zakaria/sehaty-core/pull/56),
+  [`61f650a`](https://github.com/mks-zakaria/sehaty-core/commit/61f650aa98eea7b094b44c59814b7bc22fd464ef))
+
+
 ## v1.25.0 (2026-07-15)
 
 ### Features
