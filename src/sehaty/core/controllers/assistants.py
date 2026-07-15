@@ -63,10 +63,11 @@ class MembershipRow:
 
 @dataclass(frozen=True)
 class DoctorRef:
-    """A doctor an assistant works for (id + display name from the profile)."""
+    """A doctor an assistant works for (id + display name and slug from the profile)."""
 
     doctor_id: int
     full_name: str | None
+    slug: str | None
 
 
 def _valid_email(email: str) -> bool:
@@ -191,14 +192,14 @@ class AssistantController:
 
     @staticmethod
     def list_doctors_for_assistant(assistant_id: int) -> list[DoctorRef]:
-        """List the doctors this assistant ACTIVELY works for (id + name).
+        """List the doctors this assistant ACTIVELY works for (id + name + slug).
 
         Outer-joins :class:`DoctorProfile` (by ``doctor_id``) for the display
-        name; ``geopoint`` is never selected. ``full_name`` is ``None`` if the
-        doctor has no profile row.
+        name and slug; ``geopoint`` is never selected. ``full_name`` and ``slug``
+        are ``None`` if the doctor has no profile row.
         """
         stmt = (
-            select(DoctorAssistant.doctor_id, DoctorProfile.full_name)
+            select(DoctorAssistant.doctor_id, DoctorProfile.full_name, DoctorProfile.slug)
             .outerjoin(DoctorProfile, DoctorProfile.user_id == DoctorAssistant.doctor_id)
             .where(
                 DoctorAssistant.assistant_id == assistant_id,
@@ -208,7 +209,10 @@ class AssistantController:
         )
         with get_session() as session:
             rows = session.execute(stmt).all()
-        return [DoctorRef(doctor_id=row.doctor_id, full_name=row.full_name) for row in rows]
+        return [
+            DoctorRef(doctor_id=row.doctor_id, full_name=row.full_name, slug=row.slug)
+            for row in rows
+        ]
 
     @staticmethod
     def remove_assistant(doctor_id: int, assistant_id: int) -> None:
