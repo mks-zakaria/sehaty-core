@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.25.0 (2026-07-15)
+
+### Features
+
+- Map booking-race to conflict + persist doctor timezone in profile
+  ([#54](https://github.com/mks-zakaria/sehaty-core/pull/54),
+  [`a385ea2`](https://github.com/mks-zakaria/sehaty-core/commit/a385ea2b6059e23f661d268bf1b8ec05ae6f49d6))
+
+
 ## v1.24.0 (2026-07-15)
 
 ### Features
