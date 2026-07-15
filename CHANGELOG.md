@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.18.0 (2026-07-15)
+
+### Features
+
+- Add patient register (list/detail/aggregates) and auto-link patients on booking
+  ([#38](https://github.com/mks-zakaria/sehaty-core/pull/38),
+  [`7d8dd70`](https://github.com/mks-zakaria/sehaty-core/commit/7d8dd7046091ff1aceb72ec14dc2d5186cc958b8))
+
+
 ## v1.17.0 (2026-07-14)
 
 ### Features
