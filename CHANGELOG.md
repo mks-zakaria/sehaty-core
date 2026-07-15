@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.21.0 (2026-07-15)
+
+### Features
+
+- Add assistant membership and acting-doctor resolution
+  ([#46](https://github.com/mks-zakaria/sehaty-core/pull/46),
+  [`0fc98a9`](https://github.com/mks-zakaria/sehaty-core/commit/0fc98a9030e61361befcc3931179bd59ff257ca3))
+
+
 ## v1.20.0 (2026-07-15)
 
 ### Features
