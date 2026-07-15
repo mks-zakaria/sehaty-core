@@ -275,6 +275,7 @@ def test_patient_view_resolves_doctor_name_from_profile(db: sessionmaker[Session
     assert len(rows) == 1
     assert rows[0].doctor_id == doc
     assert rows[0].doctor_name == "Dr Yassine Alaoui"
+    assert rows[0].doctor_slug == "yassine-alaoui"
     assert rows[0].reason == "checkup"
     assert rows[0].status == str(AppointmentStatus.REQUESTED)
 
@@ -288,6 +289,7 @@ def test_patient_view_falls_back_to_doctor_id_label(db: sessionmaker[Session]) -
     rows = AppointmentController.list_for_patient_view(pat)
     assert len(rows) == 1
     assert rows[0].doctor_name == f"Doctor #{doc}"
+    assert rows[0].doctor_slug is None
 
 
 def test_patient_view_ordered_and_scoped_to_patient(db: sessionmaker[Session]) -> None:
@@ -311,3 +313,4 @@ def test_patient_view_ordered_and_scoped_to_patient(db: sessionmaker[Session]) -
     rows = AppointmentController.list_for_patient_view(pat)
     assert [r.id for r in rows] == [a9, a11]
     assert [r.doctor_name for r in rows] == ["Dr One", "Dr Two"]
+    assert [r.doctor_slug for r in rows] == ["one", "two"]
