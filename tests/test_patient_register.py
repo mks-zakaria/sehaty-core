@@ -12,17 +12,22 @@ needed.
 from datetime import UTC, datetime, time, timedelta
 
 import pytest
+from geoalchemy2 import Geography
+from geoalchemy2 import functions as geo_functions
 from sehaty.db import (
     Appointment,
     AppointmentStatus,
     AuditLog,
     Availability,
+    AvailabilityException,
     ClinicPatient,
+    DoctorProfile,
     User,
     UserRole,
 )
 from sehaty.db.base import SehatyBase
 from sqlalchemy import create_engine, select
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -32,9 +37,24 @@ from sehaty.core.controllers.patients import PatientRegisterController
 from sehaty.core.db import session as session_mod
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 
+
+@compiles(Geography, "sqlite")
+def _compile_geography_sqlite(type_, compiler, **kw) -> str:  # noqa: ANN001
+    """Render the PostGIS ``geography`` column as TEXT so SQLite can build it."""
+    return "TEXT"
+
+
+@compiles(geo_functions.ST_GeogFromText, "sqlite")
+def _geog_bind_passthrough_on_sqlite(element, compiler, **kw) -> str:  # noqa: ANN001
+    """Skip the PostGIS constructor SQLite lacks; bind the raw value instead."""
+    return compiler.process(list(element.clauses)[0], **kw)
+
+
 _TABLES = [
     User.__table__,
+    DoctorProfile.__table__,
     Availability.__table__,
+    AvailabilityException.__table__,
     ClinicPatient.__table__,
     Appointment.__table__,
     AuditLog.__table__,

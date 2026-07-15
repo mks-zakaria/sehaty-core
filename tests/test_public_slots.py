@@ -15,7 +15,7 @@ Covers the verified→slots happy path plus the not-found guard for a PENDING
 from datetime import UTC, date, datetime, time
 
 import pytest
-from sehaty.db import Appointment, Availability, User, UserRole
+from sehaty.db import Appointment, Availability, AvailabilityException, User, UserRole
 from sehaty.db.base import SehatyBase
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -37,6 +37,9 @@ _DOCTOR_PROFILES_DDL = text(
     " full_name VARCHAR(255) NOT NULL,"
     " slug VARCHAR(160) NOT NULL,"
     " license_no VARCHAR(64) NOT NULL,"
+    # Slot generation reads the clinic timezone; seed 'UTC' so these local
+    # wall-clock windows convert to the same UTC instants the assertions expect.
+    " timezone VARCHAR(64) NOT NULL DEFAULT 'UTC',"
     " verification_status VARCHAR(8) NOT NULL)"
 )
 
@@ -50,7 +53,12 @@ def db() -> sessionmaker[Session]:
     )
     SehatyBase.metadata.create_all(
         engine,
-        tables=[User.__table__, Availability.__table__, Appointment.__table__],
+        tables=[
+            User.__table__,
+            Availability.__table__,
+            AvailabilityException.__table__,
+            Appointment.__table__,
+        ],
     )
     with engine.begin() as conn:
         conn.execute(_DOCTOR_PROFILES_DDL)

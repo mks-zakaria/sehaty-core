@@ -2,25 +2,34 @@
 
 Covers doctor availability CRUD + ownership, slot generation from weekly
 windows, exclusion of booked slots, double-booking conflict, and the
-role-based appointment transition matrix. Only the tables this feature touches
-(users, availabilities, appointments, audit_logs) are created — none of them
-carry the PostGIS ``geopoint`` column, so no dialect shims are needed.
+role-based appointment transition matrix. Slot generation now reads the
+doctor's clinic timezone from ``DoctorProfile``, whose PostGIS ``geopoint``
+column stock SQLite cannot compile — so a ``Geography -> TEXT`` dialect shim is
+registered and each seeded doctor gets a profile with ``timezone="UTC"``. With
+UTC clinics, local wall-clock windows equal their UTC instants, so these
+booking-logic assertions stay meaningful and unchanged (tz conversion itself is
+proven in ``test_slots_tz.py``).
 """
 
 from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
+from geoalchemy2 import Geography
+from geoalchemy2 import functions as geo_functions
 from sehaty.db import (
     Appointment,
     AppointmentStatus,
     AuditLog,
     Availability,
+    AvailabilityException,
     ClinicPatient,
+    DoctorProfile,
     User,
     UserRole,
 )
 from sehaty.db.base import SehatyBase
 from sqlalchemy import create_engine, select
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -35,9 +44,24 @@ from sehaty.core.errors import (
 )
 from sehaty.core.services.slots import available_slots, find_slot_end
 
+
+@compiles(Geography, "sqlite")
+def _compile_geography_sqlite(type_, compiler, **kw) -> str:  # noqa: ANN001
+    """Render the PostGIS ``geography`` column as TEXT so SQLite can build it."""
+    return "TEXT"
+
+
+@compiles(geo_functions.ST_GeogFromText, "sqlite")
+def _geog_bind_passthrough_on_sqlite(element, compiler, **kw) -> str:  # noqa: ANN001
+    """Skip the PostGIS constructor SQLite lacks; bind the raw value instead."""
+    return compiler.process(list(element.clauses)[0], **kw)
+
+
 _TABLES = [
     User.__table__,
+    DoctorProfile.__table__,
     Availability.__table__,
+    AvailabilityException.__table__,
     ClinicPatient.__table__,
     Appointment.__table__,
     AuditLog.__table__,
@@ -71,7 +95,23 @@ def _seed_user(factory: sessionmaker[Session], *, email: str, role: UserRole) ->
 
 
 def _seed_doctor(factory: sessionmaker[Session], email: str = "doc@clinic.ma") -> int:
-    return _seed_user(factory, email=email, role=UserRole.DOCTOR)
+    doc = _seed_user(factory, email=email, role=UserRole.DOCTOR)
+    # A UTC-clinic profile so wall-clock windows equal their UTC instants; the
+    # slots service reads DoctorProfile.timezone (defaults to Africa/Casablanca
+    # when absent, which would shift these UTC-based assertions).
+    local = email.split("@", 1)[0]
+    with factory() as s:
+        s.add(
+            DoctorProfile(
+                user_id=doc,
+                full_name="Dr Test",
+                slug=f"dr-{local}",
+                license_no=f"L-{local}",
+                timezone="UTC",
+            )
+        )
+        s.commit()
+    return doc
 
 
 def _seed_patient(factory: sessionmaker[Session], email: str = "pat@clinic.ma") -> int:
