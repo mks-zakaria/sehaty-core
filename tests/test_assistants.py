@@ -198,6 +198,10 @@ def test_list_doctors_for_assistant_reflects_memberships(db) -> None:
     names = {d.doctor_id: d.full_name for d in refs}
     assert names[d1] == "Dr Alaoui"
     assert names[d2] is None
+    # The slug rides along from the profile (None when the doctor has none).
+    slugs = {d.doctor_id: d.slug for d in refs}
+    assert slugs[d1] == "dr-alaoui"
+    assert slugs[d2] is None
 
 
 def test_remove_assistant_deactivates(db) -> None:
