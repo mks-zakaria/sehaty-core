@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.30.0 (2026-07-15)
+
+### Features
+
+- Add prescription template CRUD controller
+  ([#64](https://github.com/mks-zakaria/sehaty-core/pull/64),
+  [`a94a9f6`](https://github.com/mks-zakaria/sehaty-core/commit/a94a9f667fce05fd9d52e0e1428f09b4d46d24b0))
+
+
 ## v1.29.0 (2026-07-15)
 
 ### Features
