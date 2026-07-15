@@ -266,6 +266,64 @@ def test_get_patient_history_newest_first(db: sessionmaker[Session]) -> None:
     assert detail.history[0].start_at.replace(tzinfo=None) == _FUTURE.replace(tzinfo=None)
 
 
+def test_get_patient_no_show_count_live_matches_list(db: sessionmaker[Session]) -> None:
+    """Detail no_show_count is computed live and equals what the list reports.
+
+    The stored ClinicPatient.no_show_count column is never incremented (default
+    0), so detail must derive the count from the patient's appointments — the
+    same source list_patients aggregates — and the two must agree.
+    """
+    doc = _seed_doctor(db)
+    cp = _seed_register(db, doc, full_name="Amina")
+    _seed_appt(db, doc, cp, _PAST, AppointmentStatus.COMPLETED)
+    _seed_appt(db, doc, cp, _PAST + timedelta(days=1), AppointmentStatus.NO_SHOW)
+
+    # The stored column is stale (always 0), proving the value is live-derived.
+    with db() as s:
+        assert s.get(ClinicPatient, cp).no_show_count == 0
+
+    detail = PatientRegisterController.get_patient(doc, cp)
+    [row] = PatientRegisterController.list_patients(doc)
+    assert detail.no_show_count == 1
+    assert detail.no_show_count == row.no_show_count  # detail == list
+
+
+def test_get_patient_no_show_count_two(db: sessionmaker[Session]) -> None:
+    doc = _seed_doctor(db)
+    cp = _seed_register(db, doc, full_name="Bilal")
+    _seed_appt(db, doc, cp, _PAST, AppointmentStatus.NO_SHOW)
+    _seed_appt(db, doc, cp, _PAST + timedelta(days=1), AppointmentStatus.NO_SHOW)
+    _seed_appt(db, doc, cp, _FUTURE, AppointmentStatus.CONFIRMED)
+
+    detail = PatientRegisterController.get_patient(doc, cp)
+    [row] = PatientRegisterController.list_patients(doc)
+    assert detail.no_show_count == 2
+    assert detail.no_show_count == row.no_show_count
+
+
+def test_get_patient_no_show_count_zero(db: sessionmaker[Session]) -> None:
+    doc = _seed_doctor(db)
+    cp = _seed_register(db, doc, full_name="Chaimae")
+    _seed_appt(db, doc, cp, _PAST, AppointmentStatus.COMPLETED)
+
+    detail = PatientRegisterController.get_patient(doc, cp)
+    [row] = PatientRegisterController.list_patients(doc)
+    assert detail.no_show_count == 0
+    assert detail.no_show_count == row.no_show_count
+
+
+def test_update_patient_no_show_count_live(db: sessionmaker[Session]) -> None:
+    """The detail returned by update_patient also carries the live count."""
+    doc = _seed_doctor(db)
+    cp = _seed_register(db, doc, full_name="Dcounia")
+    _seed_appt(db, doc, cp, _PAST, AppointmentStatus.NO_SHOW)
+
+    detail = PatientRegisterController.update_patient(doc, cp, notes="flaky")
+    [row] = PatientRegisterController.list_patients(doc)
+    assert detail.no_show_count == 1
+    assert detail.no_show_count == row.no_show_count
+
+
 def test_get_patient_foreign_row_not_found(db: sessionmaker[Session]) -> None:
     doc = _seed_doctor(db, email="d1@clinic.ma")
     other = _seed_doctor(db, email="d2@clinic.ma")

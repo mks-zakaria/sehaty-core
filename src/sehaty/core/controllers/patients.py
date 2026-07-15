@@ -212,7 +212,6 @@ class PatientRegisterController:
                     ClinicPatient.birth_year,
                     ClinicPatient.notes,
                     ClinicPatient.tags,
-                    ClinicPatient.no_show_count,
                     ClinicPatient.created_at,
                 ).where(
                     ClinicPatient.id == patient_id,
@@ -253,6 +252,11 @@ class PatientRegisterController:
             )
             for v in visits
         ]
+        # Compute no_show_count live from this patient's appointment history, so
+        # detail is consistent with the list aggregation (list_patients derives
+        # it from the same appointments, not the stale stored column, which is
+        # never incremented and thus always 0).
+        no_show_count = sum(1 for v in history if v.status == AppointmentStatus.NO_SHOW)
         return PatientDetail(
             id=row.id,
             user_id=row.user_id,
@@ -263,7 +267,7 @@ class PatientRegisterController:
             birth_year=row.birth_year,
             notes=row.notes,
             tags=row.tags,
-            no_show_count=int(row.no_show_count),
+            no_show_count=no_show_count,
             total_visits=int(total_visits),
             created_at=row.created_at,
             history=history,
