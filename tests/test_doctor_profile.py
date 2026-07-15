@@ -194,9 +194,11 @@ def test_get_public_slots_returns_slots_for_verified(pg_session: Session) -> Non
     slots = DoctorController.get_public_slots(slug, _MONDAY, _MONDAY)
 
     assert len(slots) == 4
+    # The profile's default timezone is Africa/Casablanca (UTC+1 in August), so
+    # the 09:00 local window starts at 08:00Z — tz-correct slot generation.
     assert slots[0] == {
-        "start_at": datetime(2026, 8, 3, 9, 0, tzinfo=UTC),
-        "end_at": datetime(2026, 8, 3, 9, 30, tzinfo=UTC),
+        "start_at": datetime(2026, 8, 3, 8, 0, tzinfo=UTC),
+        "end_at": datetime(2026, 8, 3, 8, 30, tzinfo=UTC),
     }
 
 
