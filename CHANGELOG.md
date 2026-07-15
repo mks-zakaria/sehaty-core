@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.29.0 (2026-07-15)
+
+### Features
+
+- Add doctor dashboard stats (today, to-confirm, upcoming, patients, next appointment)
+  ([#62](https://github.com/mks-zakaria/sehaty-core/pull/62),
+  [`6d3c8e5`](https://github.com/mks-zakaria/sehaty-core/commit/6d3c8e53be1310bf63b90f060087d7252a0ea1d9))
+
+
 ## v1.28.0 (2026-07-15)
 
 ### Features
