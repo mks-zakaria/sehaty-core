@@ -17,6 +17,7 @@ Geo notes (GeoAlchemy2 over the PostGIS ``geopoint`` Geography column):
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
@@ -72,6 +73,7 @@ class DoctorView:
     lng: float | None
     consultation_fee: float | None
     languages: list[str]
+    timezone: str
     verification_status: str
     specialties: list[SpecialtyRef]
 
@@ -115,6 +117,7 @@ class DoctorController:
         lng: float | None = None,
         consultation_fee: float | None = None,
         languages: list[str] | None = None,
+        timezone: str | None = None,
         specialty_slugs: list[str] | None = None,
     ) -> str:
         """Create or update the caller's ``DoctorProfile`` and return its slug.
@@ -132,11 +135,21 @@ class DoctorController:
         silently drop a caller's intent). ``languages`` fully replaces the
         stored list when given; passing ``None`` on update leaves the existing
         list untouched (create defaults it to ``[]``).
+
+        ``timezone`` is the clinic's IANA zone. It is validated against
+        ``zoneinfo`` (an unknown zone raises ``SehatyValidationError``). On create
+        it defaults to ``"Africa/Casablanca"``; on update, ``None`` leaves the
+        stored zone untouched (like the other optional fields).
         """
         if not full_name or not full_name.strip():
             raise SehatyValidationError("full_name is required")
         full_name = full_name.strip()
         has_point = lat is not None and lng is not None
+        if timezone is not None:
+            try:
+                ZoneInfo(timezone)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise SehatyValidationError(f"unknown timezone: {timezone!r}") from exc
 
         with get_session() as session:
             role = session.execute(select(User.role).where(User.id == user_id)).scalar_one_or_none()
@@ -159,6 +172,7 @@ class DoctorController:
                     license_no=f"PENDING-{user_id}",
                     verification_status=VerificationStatus.PENDING,
                     languages=languages if languages is not None else [],
+                    timezone=timezone or "Africa/Casablanca",
                 )
                 session.add(profile)
             else:
@@ -168,6 +182,9 @@ class DoctorController:
                 # a list (even empty) fully replaces it.
                 if languages is not None:
                     profile.languages = languages
+                # None means "leave the stored zone as-is" (like the fields above).
+                if timezone is not None:
+                    profile.timezone = timezone
 
             profile.bio = bio
             profile.photo_url = photo_url
@@ -201,6 +218,7 @@ class DoctorController:
             func.ST_X(cast(DoctorProfile.geopoint, Geometry)).label("lng"),
             DoctorProfile.consultation_fee,
             DoctorProfile.languages,
+            DoctorProfile.timezone,
             DoctorProfile.verification_status,
         ).where(DoctorProfile.slug == slug)
 
@@ -233,6 +251,7 @@ class DoctorController:
             lng=row.lng,
             consultation_fee=row.consultation_fee,
             languages=list(row.languages or []),
+            timezone=row.timezone,
             verification_status=str(row.verification_status),
             specialties=[
                 SpecialtyRef(

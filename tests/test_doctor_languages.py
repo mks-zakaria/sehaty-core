@@ -24,6 +24,7 @@ from sqlalchemy.pool import StaticPool
 
 from sehaty.core.controllers.doctors import DoctorController
 from sehaty.core.db import session as session_mod
+from sehaty.core.errors import SehatyValidationError
 
 
 @compiles(Geography, "sqlite")
@@ -83,6 +84,56 @@ def _stored_languages(factory: sessionmaker[Session], user_id: int) -> list[str]
         return s.execute(
             select(DoctorProfile.languages).where(DoctorProfile.user_id == user_id)
         ).scalar_one()
+
+
+def _stored_timezone(factory: sessionmaker[Session], user_id: int) -> str:
+    with factory() as s:
+        return s.execute(
+            select(DoctorProfile.timezone).where(DoctorProfile.user_id == user_id)
+        ).scalar_one()
+
+
+def test_create_persists_timezone(db: sessionmaker[Session]) -> None:
+    uid = _make_doctor(db, "tz@clinic.ma")
+
+    DoctorController.upsert_profile(uid, full_name="Dr TZ", timezone="Europe/Paris")
+
+    assert _stored_timezone(db, uid) == "Europe/Paris"
+
+
+def test_create_defaults_timezone_to_casablanca(db: sessionmaker[Session]) -> None:
+    uid = _make_doctor(db, "notz@clinic.ma")
+
+    # No timezone given on create -> defaults to the clinic's home zone.
+    DoctorController.upsert_profile(uid, full_name="Dr No TZ")
+
+    assert _stored_timezone(db, uid) == "Africa/Casablanca"
+
+
+def test_update_none_retains_timezone(db: sessionmaker[Session]) -> None:
+    uid = _make_doctor(db, "retaintz@clinic.ma")
+    DoctorController.upsert_profile(uid, full_name="Dr Retain TZ", timezone="Europe/Paris")
+
+    # A later update that omits timezone (None) must not clobber the stored zone.
+    DoctorController.upsert_profile(uid, full_name="Dr Retain TZ", bio="updated")
+
+    assert _stored_timezone(db, uid) == "Europe/Paris"
+
+
+def test_update_replaces_timezone(db: sessionmaker[Session]) -> None:
+    uid = _make_doctor(db, "replacetz@clinic.ma")
+    DoctorController.upsert_profile(uid, full_name="Dr Replace TZ", timezone="Europe/Paris")
+
+    DoctorController.upsert_profile(uid, full_name="Dr Replace TZ", timezone="Africa/Casablanca")
+
+    assert _stored_timezone(db, uid) == "Africa/Casablanca"
+
+
+def test_invalid_timezone_raises(db: sessionmaker[Session]) -> None:
+    uid = _make_doctor(db, "badtz@clinic.ma")
+
+    with pytest.raises(SehatyValidationError):
+        DoctorController.upsert_profile(uid, full_name="Dr Bad TZ", timezone="Mars/Phobos")
 
 
 def test_create_persists_languages(db: sessionmaker[Session]) -> None:

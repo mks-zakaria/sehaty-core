@@ -73,6 +73,7 @@ def test_upsert_persists_point_and_roundtrips(pg_session: Session) -> None:
         lng=_LNG,
         consultation_fee=350.0,
         languages=["ar", "fr"],
+        timezone="Europe/Paris",
     )
     _verify(pg_session, uid)
 
@@ -90,6 +91,8 @@ def test_upsert_persists_point_and_roundtrips(pg_session: Session) -> None:
     assert view.lng == pytest.approx(_LNG, abs=_EPS)
     # Spoken languages are persisted and surfaced by the public view.
     assert view.languages == ["ar", "fr"]
+    # The clinic timezone is persisted and surfaced by the public view.
+    assert view.timezone == "Europe/Paris"
 
 
 def test_slug_unique_across_same_name(pg_session: Session) -> None:

@@ -20,6 +20,7 @@ from sehaty.db import (
     UserRole,
 )
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import (
@@ -138,7 +139,18 @@ class AppointmentController:
                 clinic_patient_id=register.id,
             )
             session.add(appt)
-            session.flush()
+            # Race safety net. The find_slot_end pre-check above is the fast path,
+            # but two concurrent bookings of the same free slot both pass it and
+            # only collide at flush: Postgres' ``appointments_no_overlap`` EXCLUDE
+            # constraint then rejects the second insert with an IntegrityError
+            # naming ``appointments_no_overlap``. Catch it and surface a clean 409
+            # rather than a raw driver error. Any IntegrityError on this insert
+            # means the slot is no longer free, so we do not need to inspect the
+            # message to know the booking lost the race.
+            try:
+                session.flush()
+            except IntegrityError as exc:
+                raise SehatyConflictError("that slot was just taken") from exc
             session.add(
                 AuditLog(
                     actor_user_id=patient_id,
