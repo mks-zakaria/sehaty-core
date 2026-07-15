@@ -15,6 +15,7 @@ from sehaty.db import (
     AppointmentStatus,
     AuditLog,
     Availability,
+    ClinicPatient,
     User,
     UserRole,
 )
@@ -37,6 +38,7 @@ from sehaty.core.services.slots import available_slots, find_slot_end
 _TABLES = [
     User.__table__,
     Availability.__table__,
+    ClinicPatient.__table__,
     Appointment.__table__,
     AuditLog.__table__,
 ]

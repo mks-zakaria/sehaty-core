@@ -9,7 +9,7 @@ raise the ``SehatyError`` taxonomy; methods never return ``None`` for an error.
 
 from datetime import UTC, datetime
 
-from sehaty.db import Appointment, AppointmentStatus, AuditLog, UserRole
+from sehaty.db import Appointment, AppointmentStatus, AuditLog, ClinicPatient, User, UserRole
 from sqlalchemy import select
 
 from sehaty.core.db.session import get_session
@@ -57,6 +57,31 @@ class AppointmentController:
                 raise SehatyConflictError(
                     "requested slot is not available (already booked or outside availability)"
                 )
+
+            # Auto-link the booking to the doctor's patient register (same session,
+            # no nesting). Reuse the doctor's existing register row for this app
+            # patient, or create one — backfilling contact details from the patient
+            # User (full_name stays NULL; patients carry no stored name).
+            register = session.execute(
+                select(ClinicPatient).where(
+                    ClinicPatient.doctor_id == doctor_id,
+                    ClinicPatient.user_id == patient_id,
+                )
+            ).scalar_one_or_none()
+            if register is None:
+                contact = session.execute(
+                    select(User.phone, User.email).where(User.id == patient_id)
+                ).one_or_none()
+                register = ClinicPatient(
+                    doctor_id=doctor_id,
+                    user_id=patient_id,
+                    phone=contact.phone if contact is not None else None,
+                    email=contact.email if contact is not None else None,
+                    created_by=patient_id,
+                )
+                session.add(register)
+                session.flush()
+
             appt = Appointment(
                 patient_id=patient_id,
                 doctor_id=doctor_id,
@@ -64,6 +89,7 @@ class AppointmentController:
                 end_at=end_at,
                 status=AppointmentStatus.REQUESTED,
                 reason=reason,
+                clinic_patient_id=register.id,
             )
             session.add(appt)
             session.flush()
