@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.20.0 (2026-07-15)
+
+### Features
+
+- Add practice-profile letterheads and freehand prescriptions
+  ([#44](https://github.com/mks-zakaria/sehaty-core/pull/44),
+  [`2ab3d38`](https://github.com/mks-zakaria/sehaty-core/commit/2ab3d38dd01299ecd632c7361f5db7cf666a1e35))
+
+
 ## v1.19.0 (2026-07-15)
 
 ### Features
