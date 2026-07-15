@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.24.0 (2026-07-15)
+
+### Features
+
+- Timezone-correct slot generation + availability exceptions
+  ([#52](https://github.com/mks-zakaria/sehaty-core/pull/52),
+  [`3474374`](https://github.com/mks-zakaria/sehaty-core/commit/347437438901049591973d406ef155dd1689f9b5))
+
+
 ## v1.23.0 (2026-07-15)
 
 ### Features
