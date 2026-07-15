@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.27.0 (2026-07-15)
+
+### Features
+
+- Add doctor_slug to patient appointment view
+  ([#58](https://github.com/mks-zakaria/sehaty-core/pull/58),
+  [`23e565b`](https://github.com/mks-zakaria/sehaty-core/commit/23e565bcdf3f7045d6bf673b641051b5b457c018))
+
+
 ## v1.26.0 (2026-07-15)
 
 ### Features
