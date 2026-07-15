@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.19.0 (2026-07-15)
+
+### Features
+
+- Add diagnoses and patient treatment-feedback controllers
+  ([#42](https://github.com/mks-zakaria/sehaty-core/pull/42),
+  [`13921db`](https://github.com/mks-zakaria/sehaty-core/commit/13921db86f1aba0f91732c1ab42c977d98f492cf))
+
+
 ## v1.18.1 (2026-07-15)
 
 ### Bug Fixes
