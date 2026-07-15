@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.28.0 (2026-07-15)
+
+### Features
+
+- Add run_reminders (one-time patient reminder for upcoming confirmed appointments)
+  ([#60](https://github.com/mks-zakaria/sehaty-core/pull/60),
+  [`92dd636`](https://github.com/mks-zakaria/sehaty-core/commit/92dd6362226bef915d26d5f506a7a35cc19b0422))
+
+
 ## v1.27.0 (2026-07-15)
 
 ### Features
