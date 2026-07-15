@@ -36,7 +36,11 @@ from sehaty.core.controllers.practice import (
     PracticeProfileRow,
 )
 from sehaty.core.db.session import get_session
-from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
+from sehaty.core.errors import (
+    SehatyForbiddenError,
+    SehatyNotFoundError,
+    SehatyValidationError,
+)
 
 # Public verification code: short, unambiguous uppercase alphabet (no 0/O/1/I).
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -222,27 +226,37 @@ class PrescriptionController:
                 raise SehatyNotFoundError(
                     f"no prescription {prescription_id} for doctor {doctor_id}"
                 )
+            return PrescriptionController._detail_with_letterhead(session, prescription)
 
-            letterhead: PracticeProfileRow | None = None
-            if prescription.practice_profile_id is not None:
-                profile = session.get(PracticeProfile, prescription.practice_profile_id)
-                if profile is not None:
-                    from sehaty.core.controllers.practice import _row
+    @staticmethod
+    def get_for_app_patient(user_id: int, prescription_id: int) -> PrescriptionDetail:
+        """Return one of the patient's OWN prescriptions with items + letterhead.
 
-                    letterhead = _row(profile)
+        Same :class:`PrescriptionDetail` shape as :meth:`get`, but authorised by
+        the PATIENT: the prescription must exist (else
+        :class:`SehatyNotFoundError`) and its register patient
+        (``clinic_patient.user_id``) must be ``user_id`` (else
+        :class:`SehatyForbiddenError`) — so a patient only ever sees the meds on
+        their own prescriptions.
+        """
+        with get_session() as session:
+            prescription = session.get(Prescription, prescription_id)
+            if prescription is None:
+                raise SehatyNotFoundError(f"no prescription {prescription_id}")
 
-            item_rows = PrescriptionController._resolve_items(session, prescription.id)
-            return PrescriptionDetail(
-                id=prescription.id,
-                code=prescription.code,
-                status=str(prescription.status),
-                issued_at=prescription.issued_at,
-                expires_at=prescription.expires_at,
-                notes=prescription.notes,
-                practice_profile_id=prescription.practice_profile_id,
-                items=item_rows,
-                letterhead=letterhead,
-            )
+            owner_user_id = None
+            if prescription.clinic_patient_id is not None:
+                owner_user_id = session.execute(
+                    select(ClinicPatient.user_id).where(
+                        ClinicPatient.id == prescription.clinic_patient_id
+                    )
+                ).scalar_one_or_none()
+            if owner_user_id != user_id:
+                raise SehatyForbiddenError(
+                    f"prescription {prescription_id} does not belong to user {user_id}"
+                )
+
+            return PrescriptionController._detail_with_letterhead(session, prescription)
 
     @staticmethod
     def list_for_app_patient(user_id: int) -> list[PrescriptionSummary]:
@@ -283,6 +297,35 @@ class PrescriptionController:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _detail_with_letterhead(session, prescription: Prescription) -> PrescriptionDetail:
+        """Build a full :class:`PrescriptionDetail` (items + letterhead snapshot).
+
+        Shared by :meth:`get` and :meth:`get_for_app_patient` so both return the
+        identical shape. ``letterhead`` is the practice-profile snapshot, or
+        ``None`` if the profile was removed / never set.
+        """
+        letterhead: PracticeProfileRow | None = None
+        if prescription.practice_profile_id is not None:
+            profile = session.get(PracticeProfile, prescription.practice_profile_id)
+            if profile is not None:
+                from sehaty.core.controllers.practice import _row
+
+                letterhead = _row(profile)
+
+        item_rows = PrescriptionController._resolve_items(session, prescription.id)
+        return PrescriptionDetail(
+            id=prescription.id,
+            code=prescription.code,
+            status=str(prescription.status),
+            issued_at=prescription.issued_at,
+            expires_at=prescription.expires_at,
+            notes=prescription.notes,
+            practice_profile_id=prescription.practice_profile_id,
+            items=item_rows,
+            letterhead=letterhead,
+        )
 
     @staticmethod
     def _build_item(raw: dict) -> PrescriptionItem:
