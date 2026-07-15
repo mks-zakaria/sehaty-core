@@ -10,7 +10,15 @@ raise the ``SehatyError`` taxonomy; methods never return ``None`` for an error.
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sehaty.db import Appointment, AppointmentStatus, AuditLog, ClinicPatient, User, UserRole
+from sehaty.db import (
+    Appointment,
+    AppointmentStatus,
+    AuditLog,
+    ClinicPatient,
+    DoctorProfile,
+    User,
+    UserRole,
+)
 from sqlalchemy import select
 
 from sehaty.core.db.session import get_session
@@ -33,6 +41,24 @@ class AppointmentGridRow:
     clinic_patient_id: int | None
     patient_name: str
     patient_phone: str | None
+    start_at: datetime
+    end_at: datetime
+    status: str
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class PatientAppointmentRow:
+    """One appointment in a patient's own list (detached projection).
+
+    ``doctor_name`` is always human-readable: it resolves from the doctor's
+    :class:`DoctorProfile` ``full_name`` and falls back to ``"Doctor #{id}"``
+    when the doctor has no profile (or an empty name).
+    """
+
+    id: int
+    doctor_id: int
+    doctor_name: str
     start_at: datetime
     end_at: datetime
     status: str
@@ -233,6 +259,53 @@ class AppointmentController:
                 )
             )
         return grid
+
+    @staticmethod
+    def list_for_patient_view(patient_user_id: int) -> list["PatientAppointmentRow"]:
+        """List a patient's own appointments with a human-readable doctor name.
+
+        One column-only ``select(...)`` left-joins each appointment to the
+        doctor's :class:`DoctorProfile` (on ``DoctorProfile.user_id ==
+        Appointment.doctor_id``), selecting only scalar columns — no PostGIS
+        ``geopoint`` — so it runs on SQLite (tests) and Postgres alike.
+
+        ``doctor_name`` resolves to the profile's ``full_name``, falling back to
+        ``"Doctor #{doctor_id}"`` when the doctor has no profile or an empty
+        name. Ordered by ``start_at`` (then ``id`` for a stable tie-break).
+        """
+        stmt = (
+            select(
+                Appointment.id,
+                Appointment.doctor_id,
+                Appointment.start_at,
+                Appointment.end_at,
+                Appointment.status,
+                Appointment.reason,
+                DoctorProfile.full_name.label("doctor_full_name"),
+            )
+            .outerjoin(DoctorProfile, DoctorProfile.user_id == Appointment.doctor_id)
+            .where(Appointment.patient_id == patient_user_id)
+            .order_by(Appointment.start_at, Appointment.id)
+        )
+
+        with get_session() as session:
+            rows = session.execute(stmt).all()
+
+        result: list[PatientAppointmentRow] = []
+        for row in rows:
+            name = row.doctor_full_name or f"Doctor #{row.doctor_id}"
+            result.append(
+                PatientAppointmentRow(
+                    id=row.id,
+                    doctor_id=row.doctor_id,
+                    doctor_name=name,
+                    start_at=row.start_at,
+                    end_at=row.end_at,
+                    status=str(row.status),
+                    reason=row.reason,
+                )
+            )
+        return result
 
     @staticmethod
     def transition(

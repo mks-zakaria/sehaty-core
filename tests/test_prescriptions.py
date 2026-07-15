@@ -30,7 +30,11 @@ from sqlalchemy.pool import StaticPool
 from sehaty.core.controllers.practice import PracticeProfileController
 from sehaty.core.controllers.prescriptions import PrescriptionController
 from sehaty.core.db import session as session_mod
-from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
+from sehaty.core.errors import (
+    SehatyForbiddenError,
+    SehatyNotFoundError,
+    SehatyValidationError,
+)
 
 _TABLES = [
     User.__table__,
@@ -406,3 +410,58 @@ def test_cancel_foreign_not_found(db) -> None:
     detail = PrescriptionController.create(other, cp, items=[_freehand_item()])
     with pytest.raises(SehatyNotFoundError):
         PrescriptionController.cancel(doc, detail.id)
+
+
+# --------------------------------------------------------------------------- #
+# Patient-scoped detail: get_for_app_patient
+# --------------------------------------------------------------------------- #
+
+
+def test_get_for_app_patient_returns_items_for_owner(db) -> None:
+    doc = _seed_doctor(db)
+    pat = _seed_patient(db)
+    cp = _seed_register(db, doc, user_id=pat)
+    med = _seed_medication(db, inn_name="Paracetamol")
+    detail = PrescriptionController.create(
+        doc,
+        cp,
+        items=[
+            _freehand_item(drug_name="Doliprane", dosage="1 tablet", frequency="3x/day"),
+            {"medication_id": med, "dosage": "500mg", "frequency": "2x/day", "quantity": 12},
+        ],
+    )
+
+    got = PrescriptionController.get_for_app_patient(pat, detail.id)
+    assert got.id == detail.id
+    assert got.status == str(PrescriptionStatus.ISSUED)
+    names = {i.drug_name for i in got.items}
+    assert names == {"Doliprane", "Paracetamol"}  # freehand + resolved catalog
+    assert len(got.items) == 2
+
+
+def test_get_for_app_patient_forbidden_for_other_user(db) -> None:
+    doc = _seed_doctor(db)
+    pat = _seed_patient(db)
+    intruder = _seed_patient(db, email="intruder@clinic.ma")
+    cp = _seed_register(db, doc, user_id=pat)
+    detail = PrescriptionController.create(doc, cp, items=[_freehand_item()])
+
+    with pytest.raises(SehatyForbiddenError):
+        PrescriptionController.get_for_app_patient(intruder, detail.id)
+
+
+def test_get_for_app_patient_walkin_forbidden(db) -> None:
+    # Prescription for a walk-in (no linked user) -> no app patient may view it.
+    doc = _seed_doctor(db)
+    pat = _seed_patient(db)
+    cp = _seed_register(db, doc, user_id=None)
+    detail = PrescriptionController.create(doc, cp, items=[_freehand_item()])
+
+    with pytest.raises(SehatyForbiddenError):
+        PrescriptionController.get_for_app_patient(pat, detail.id)
+
+
+def test_get_for_app_patient_unknown_id_not_found(db) -> None:
+    pat = _seed_patient(db)
+    with pytest.raises(SehatyNotFoundError):
+        PrescriptionController.get_for_app_patient(pat, 987654)

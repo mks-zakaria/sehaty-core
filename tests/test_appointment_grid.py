@@ -20,7 +20,7 @@ from sehaty.db import (
     UserRole,
 )
 from sehaty.db.base import SehatyBase
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -34,6 +34,18 @@ _TABLES = [
     Appointment.__table__,
 ]
 
+# Minimal, geopoint-free stand-in for doctor_profiles: SQLite cannot compile the
+# real table's PostGIS ``Geography`` column via ``create_all``, and
+# ``list_for_patient_view`` only projects ``full_name`` (never ``geopoint``).
+_DOCTOR_PROFILES_DDL = text(
+    "CREATE TABLE doctor_profiles ("
+    " user_id INTEGER PRIMARY KEY,"
+    " full_name VARCHAR(255) NOT NULL,"
+    " slug VARCHAR(160) NOT NULL,"
+    " license_no VARCHAR(64) NOT NULL,"
+    " verification_status VARCHAR(8) NOT NULL DEFAULT 'PENDING')"
+)
+
 _BASE = datetime(2026, 8, 3, 9, 0, tzinfo=UTC)
 
 
@@ -45,10 +57,26 @@ def db() -> sessionmaker[Session]:
         poolclass=StaticPool,
     )
     SehatyBase.metadata.create_all(engine, tables=_TABLES)
+    with engine.begin() as conn:
+        conn.execute(_DOCTOR_PROFILES_DDL)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     session_mod.set_session_factory(factory)
     yield factory
     session_mod.set_session_factory(None)
+
+
+def _seed_doctor_profile(
+    factory: sessionmaker[Session], *, user_id: int, full_name: str, slug: str
+) -> None:
+    with factory() as s:
+        s.execute(
+            text(
+                "INSERT INTO doctor_profiles (user_id, full_name, slug, license_no)"
+                " VALUES (:u, :n, :sl, :l)"
+            ),
+            {"u": user_id, "n": full_name, "sl": slug, "l": f"LIC-{user_id}"},
+        )
+        s.commit()
 
 
 def _seed_user(
@@ -228,3 +256,58 @@ def test_scoped_to_doctor(db: sessionmaker[Session]) -> None:
     rows = AppointmentController.list_for_doctor(doc)
     assert [r.id for r in rows] == [mine]
     assert rows[0].patient_name == "Mine"
+
+
+# --------------------------------------------------------------------------- #
+# Patient view: list_for_patient_view (doctor_name resolution)
+# --------------------------------------------------------------------------- #
+
+
+def test_patient_view_resolves_doctor_name_from_profile(db: sessionmaker[Session]) -> None:
+    doc = _seed_user(db, email="doc@clinic.ma", role=UserRole.DOCTOR)
+    pat = _seed_user(db, email="pat@clinic.ma", role=UserRole.PATIENT)
+    _seed_doctor_profile(db, user_id=doc, full_name="Dr Yassine Alaoui", slug="yassine-alaoui")
+    _seed_appt(
+        db, doctor_id=doc, patient_id=pat, start_at=_BASE, clinic_patient_id=None, reason="checkup"
+    )
+
+    rows = AppointmentController.list_for_patient_view(pat)
+    assert len(rows) == 1
+    assert rows[0].doctor_id == doc
+    assert rows[0].doctor_name == "Dr Yassine Alaoui"
+    assert rows[0].reason == "checkup"
+    assert rows[0].status == str(AppointmentStatus.REQUESTED)
+
+
+def test_patient_view_falls_back_to_doctor_id_label(db: sessionmaker[Session]) -> None:
+    # Doctor user exists but has NO doctor_profiles row -> "Doctor #id".
+    doc = _seed_user(db, email="doc@clinic.ma", role=UserRole.DOCTOR)
+    pat = _seed_user(db, email="pat@clinic.ma", role=UserRole.PATIENT)
+    _seed_appt(db, doctor_id=doc, patient_id=pat, start_at=_BASE, clinic_patient_id=None)
+
+    rows = AppointmentController.list_for_patient_view(pat)
+    assert len(rows) == 1
+    assert rows[0].doctor_name == f"Doctor #{doc}"
+
+
+def test_patient_view_ordered_and_scoped_to_patient(db: sessionmaker[Session]) -> None:
+    doc1 = _seed_user(db, email="doc1@clinic.ma", role=UserRole.DOCTOR)
+    doc2 = _seed_user(db, email="doc2@clinic.ma", role=UserRole.DOCTOR)
+    pat = _seed_user(db, email="pat@clinic.ma", role=UserRole.PATIENT)
+    other = _seed_user(db, email="other@clinic.ma", role=UserRole.PATIENT)
+    _seed_doctor_profile(db, user_id=doc1, full_name="Dr One", slug="one")
+    _seed_doctor_profile(db, user_id=doc2, full_name="Dr Two", slug="two")
+
+    # Inserted out of order; expect start_at ordering.
+    a11 = _seed_appt(
+        db, doctor_id=doc2, patient_id=pat, start_at=_BASE.replace(hour=11), clinic_patient_id=None
+    )
+    a9 = _seed_appt(
+        db, doctor_id=doc1, patient_id=pat, start_at=_BASE.replace(hour=9), clinic_patient_id=None
+    )
+    # Another patient's appointment must not appear.
+    _seed_appt(db, doctor_id=doc1, patient_id=other, start_at=_BASE, clinic_patient_id=None)
+
+    rows = AppointmentController.list_for_patient_view(pat)
+    assert [r.id for r in rows] == [a9, a11]
+    assert [r.doctor_name for r in rows] == ["Dr One", "Dr Two"]
