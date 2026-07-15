@@ -27,7 +27,7 @@ from sehaty.core.errors import (
     SehatyConflictError,
     SehatyForbiddenError,
 )
-from sehaty.core.services.slots import find_slot_end
+from sehaty.core.services.slots import _as_utc, find_slot_end
 
 
 @dataclass(frozen=True)
@@ -376,6 +376,123 @@ class AppointmentController:
                 patient_id,
                 kind=f"appointment_{new_status.value.lower()}",
                 message=f"Your appointment is now {human}",
+                entity="appointment",
+                entity_id=appointment_id,
+            )
+        except Exception:
+            pass
+        return appt
+
+    @staticmethod
+    def reschedule(
+        user_id: int,
+        role: UserRole,
+        appointment_id: int,
+        new_start_at: datetime,
+        notes: str | None = None,
+    ) -> Appointment:
+        """Move an existing appointment to a different free slot.
+
+        A first-class alternative to cancel + rebook: the same appointment row is
+        moved, preserving its identity, ``patient_id``/``doctor_id`` link, and
+        register association. Ownership follows :meth:`transition`: a PATIENT must
+        own ``patient_id``, a DOCTOR must own ``doctor_id`` (else
+        ``SehatyForbiddenError``); a linked assistant is served by the API passing
+        the acting doctor's id with role ``DOCTOR``, so there is no
+        assistant-specific branch here.
+
+        Only a REQUESTED or CONFIRMED appointment may move (a COMPLETED /
+        CANCELLED / NO_SHOW one raises ``SehatyConflictError``). ``new_start_at``
+        must be a genuine FREE slot for the doctor, validated tz-aware via
+        :func:`find_slot_end`; an unavailable slot (already booked or outside
+        availability) raises ``SehatyConflictError``. Passing the appointment's
+        *current* start is a no-op success — the row is returned unchanged (this
+        avoids the slot check rejecting the appointment's own — necessarily
+        "booked" — slot, and spares a spurious audit/notification).
+
+        Status semantics: a PATIENT move resets the status to REQUESTED (a moved
+        appointment needs the doctor's re-confirmation); a DOCTOR move preserves
+        the current status. ``notes`` when provided is stored on the row. Writes
+        an ``APPT_RESCHEDULED`` audit entry, and AFTER commit notifies the OTHER
+        party (kind ``appointment_rescheduled``) — non-fatal, mirroring
+        :meth:`book` / :meth:`transition`. Returns the updated (detached)
+        appointment.
+        """
+        if new_start_at.tzinfo is None:
+            new_start_at = new_start_at.replace(tzinfo=UTC)
+        else:
+            new_start_at = new_start_at.astimezone(UTC)
+
+        with get_session() as session:
+            appt = session.get(Appointment, appointment_id)
+            if appt is None:
+                raise SehatyForbiddenError("not your appointment")
+
+            if role == UserRole.DOCTOR and appt.doctor_id == user_id:
+                pass
+            elif role == UserRole.PATIENT and appt.patient_id == user_id:
+                pass
+            else:
+                raise SehatyForbiddenError("not your appointment")
+
+            if appt.status not in (AppointmentStatus.REQUESTED, AppointmentStatus.CONFIRMED):
+                raise SehatyConflictError(f"cannot reschedule a {appt.status.value} appointment")
+
+            doctor_id = appt.doctor_id
+            patient_id = appt.patient_id
+
+            # Moving to the slot it already occupies is a no-op success. Short-
+            # circuit BEFORE find_slot_end, which would otherwise reject the
+            # appointment's own (self-booked, hence not "free") slot.
+            if appt.start_at is not None and _as_utc(appt.start_at) == new_start_at:
+                if notes is not None:
+                    appt.notes = notes
+                    session.flush()
+                return appt
+
+            new_end_at = find_slot_end(session, doctor_id, new_start_at)
+            if new_end_at is None:
+                raise SehatyConflictError("requested slot is not available")
+
+            appt.start_at = new_start_at
+            appt.end_at = new_end_at
+            if role == UserRole.PATIENT:
+                appt.status = AppointmentStatus.REQUESTED
+            if notes is not None:
+                appt.notes = notes
+
+            # Race safety net, identical in spirit to book(): the find_slot_end
+            # pre-check is the fast path, but two concurrent moves onto the same
+            # free slot both pass it and only collide at flush against the
+            # ``appointments_no_overlap`` EXCLUDE constraint (Postgres). Surface a
+            # clean 409 rather than a raw driver error.
+            try:
+                session.flush()
+            except IntegrityError as exc:
+                raise SehatyConflictError("that slot was just taken") from exc
+
+            session.add(
+                AuditLog(
+                    actor_user_id=user_id,
+                    action="APPT_RESCHEDULED",
+                    entity="appointment",
+                    entity_id=appt.id,
+                )
+            )
+            session.flush()
+
+        # Notify the OTHER party AFTER the move commits (its own session, never
+        # nested). A patient's move alerts the doctor; a doctor's move alerts the
+        # patient. A notification failure must NEVER break the reschedule, which
+        # is already persisted above.
+        recipient = doctor_id if role == UserRole.PATIENT else patient_id
+        try:
+            from sehaty.core.controllers.notifications import NotificationController
+
+            NotificationController.notify(
+                recipient,
+                kind="appointment_rescheduled",
+                message="An appointment was rescheduled",
                 entity="appointment",
                 entity_id=appointment_id,
             )
