@@ -8,7 +8,7 @@ raise the ``SehatyError`` taxonomy; methods never return ``None`` for an error.
 """
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sehaty.db import (
     Appointment,
@@ -19,7 +19,7 @@ from sehaty.db import (
     User,
     UserRole,
 )
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from sehaty.core.db.session import get_session
@@ -505,3 +505,103 @@ class AppointmentController:
         except Exception:
             pass
         return appt
+
+    @staticmethod
+    def run_reminders(within_hours: int = 24, now: datetime | None = None) -> int:
+        """Send a one-time patient reminder for each imminent CONFIRMED appointment.
+
+        Scans CONFIRMED appointments whose ``start_at`` falls in the half-open
+        window ``[now, now + within_hours)`` and that have not yet been reminded
+        (``reminder_sent_at IS NULL``). For every match it stamps
+        ``reminder_sent_at = now`` and commits FIRST, then emits a patient
+        notification (kind ``appointment_reminder``) per appointment AFTER the
+        commit — the same never-nested, non-fatal notify pattern as
+        :meth:`book` / :meth:`transition`.
+
+        Stamping the marker before notifying makes the reminder idempotent: a
+        second run finds those rows non-NULL and skips them, so a reminder is
+        never sent twice even across repeated (e.g. cron) invocations. A single
+        failed notify neither re-notifies on the next run nor blocks the other
+        reminders in this batch. Returns the number of appointments reminded on
+        THIS call.
+
+        ``now`` defaults to the current UTC instant and is normalised to
+        UTC-aware so the window compares cleanly against the tz-aware
+        ``start_at`` column.
+        """
+        if now is None:
+            now = datetime.now(UTC)
+        elif now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
+        else:
+            now = now.astimezone(UTC)
+        window_end = now + timedelta(hours=within_hours)
+
+        # Collect the due appointments and mark them reminded INSIDE the session
+        # (column-only projection — no PostGIS geopoint — so it runs on SQLite
+        # and Postgres alike). Marking before we notify is what dedupes repeated
+        # runs.
+        with get_session() as session:
+            rows = session.execute(
+                select(
+                    Appointment.id,
+                    Appointment.patient_id,
+                    Appointment.doctor_id,
+                    Appointment.start_at,
+                ).where(
+                    Appointment.status == AppointmentStatus.CONFIRMED,
+                    Appointment.reminder_sent_at.is_(None),
+                    Appointment.start_at >= now,
+                    Appointment.start_at < window_end,
+                )
+            ).all()
+            pending = [(r.id, r.patient_id, r.doctor_id, r.start_at) for r in rows]
+            if not pending:
+                return 0
+
+            session.execute(
+                update(Appointment)
+                .where(Appointment.id.in_([appt_id for appt_id, *_ in pending]))
+                .values(reminder_sent_at=now)
+            )
+
+        # Best-effort doctor display names for the message (its own session,
+        # column-only — no PostGIS geopoint). This is purely decorative: the
+        # marker is already committed, so any failure here just falls back to
+        # "your doctor" and never un-marks or blocks a reminder.
+        doctor_names: dict[int, str] = {}
+        try:
+            doctor_ids = {doctor_id for _, _, doctor_id, _ in pending}
+            with get_session() as session:
+                for user_id, full_name in session.execute(
+                    select(DoctorProfile.user_id, DoctorProfile.full_name).where(
+                        DoctorProfile.user_id.in_(doctor_ids)
+                    )
+                ).all():
+                    if full_name:
+                        doctor_names[user_id] = full_name
+        except Exception:
+            doctor_names = {}
+
+        # Notify each patient AFTER the marker commits (its own session, never
+        # nested). A notify failure must NEVER prevent the remaining reminders —
+        # and, since the marker is already persisted, a failed one is simply not
+        # retried on the next run.
+        from sehaty.core.controllers.notifications import NotificationController
+
+        for appointment_id, patient_id, doctor_id, start_at in pending:
+            doctor_name = doctor_names.get(doctor_id, "your doctor")
+            message = (
+                f"Reminder: your appointment with {doctor_name} on {start_at:%Y-%m-%d} is coming up"
+            )
+            try:
+                NotificationController.notify(
+                    patient_id,
+                    kind="appointment_reminder",
+                    message=message,
+                    entity="appointment",
+                    entity_id=appointment_id,
+                )
+            except Exception:
+                pass
+        return len(pending)
