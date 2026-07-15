@@ -24,6 +24,7 @@ from sehaty.db import (
     AvailabilityException,
     ClinicPatient,
     DoctorProfile,
+    Notification,
     User,
     UserRole,
 )
@@ -66,6 +67,7 @@ _TABLES = [
     ClinicPatient.__table__,
     Appointment.__table__,
     AuditLog.__table__,
+    Notification.__table__,
 ]
 
 # A fixed Monday used as the anchor for weekday-aligned slot tests.
@@ -411,3 +413,129 @@ def test_transition_writes_audit(db: sessionmaker[Session]) -> None:
         )
     assert "BOOK" in actions
     assert "APPT_CONFIRMED" in actions
+
+
+# --------------------------------------------------------------------------- #
+# Reschedule (move to a new free slot)
+# --------------------------------------------------------------------------- #
+
+_SLOT_9 = datetime(2026, 8, 3, 9, 0, tzinfo=UTC)
+_SLOT_930 = datetime(2026, 8, 3, 9, 30, tzinfo=UTC)
+
+
+def _notif_kinds(db: sessionmaker[Session], user_id: int) -> list[str]:
+    """The kinds of notifications addressed to ``user_id`` (import kept local)."""
+    from sehaty.core.controllers.notifications import NotificationController
+
+    return [n.kind for n in NotificationController.list_for(user_id)]
+
+
+def test_patient_reschedule_confirmed_moves_and_resets_to_requested(
+    db: sessionmaker[Session],
+) -> None:
+    doc, pat, appt_id = _fresh_appointment(db)
+    # Bring it to CONFIRMED so the reset back to REQUESTED is observable.
+    AppointmentController.transition(doc, UserRole.DOCTOR, appt_id, AppointmentStatus.CONFIRMED)
+
+    a = AppointmentController.reschedule(pat, UserRole.PATIENT, appt_id, _SLOT_930)
+
+    assert a.start_at == _SLOT_930
+    assert a.end_at == datetime(2026, 8, 3, 10, 0, tzinfo=UTC)
+    # A patient move needs re-confirmation.
+    assert a.status == AppointmentStatus.REQUESTED
+    # The doctor (the OTHER party) is notified.
+    assert "appointment_rescheduled" in _notif_kinds(db, doc)
+    # Old slot is free again, new slot is taken.
+    with db() as s:
+        starts = {sl[0] for sl in available_slots(s, doc, _MONDAY, _MONDAY)}
+    assert _SLOT_9 in starts
+    assert _SLOT_930 not in starts
+
+
+def test_doctor_reschedule_preserves_status_and_notifies_patient(
+    db: sessionmaker[Session],
+) -> None:
+    doc, pat, appt_id = _fresh_appointment(db)
+    AppointmentController.transition(doc, UserRole.DOCTOR, appt_id, AppointmentStatus.CONFIRMED)
+
+    a = AppointmentController.reschedule(doc, UserRole.DOCTOR, appt_id, _SLOT_930)
+
+    assert a.start_at == _SLOT_930
+    # A doctor move keeps the current status.
+    assert a.status == AppointmentStatus.CONFIRMED
+    # The patient (the OTHER party) is notified.
+    assert "appointment_rescheduled" in _notif_kinds(db, pat)
+
+
+def test_reschedule_writes_audit(db: sessionmaker[Session]) -> None:
+    _doc, pat, appt_id = _fresh_appointment(db)
+    AppointmentController.reschedule(pat, UserRole.PATIENT, appt_id, _SLOT_930, notes="moved")
+    with db() as s:
+        actions = set(
+            s.execute(select(AuditLog.action).where(AuditLog.entity_id == appt_id)).scalars()
+        )
+        appt = s.get(Appointment, appt_id)
+    assert "APPT_RESCHEDULED" in actions
+    assert appt.notes == "moved"
+
+
+def test_reschedule_to_unavailable_slot_conflicts(db: sessionmaker[Session]) -> None:
+    _doc, pat, appt_id = _fresh_appointment(db)
+    # 13:00 is outside the 09:00-12:00 window.
+    with pytest.raises(SehatyConflictError):
+        AppointmentController.reschedule(
+            pat, UserRole.PATIENT, appt_id, datetime(2026, 8, 3, 13, 0, tzinfo=UTC)
+        )
+
+
+def test_reschedule_onto_taken_slot_conflicts(db: sessionmaker[Session]) -> None:
+    doc, pat, appt_id = _fresh_appointment(db)
+    # A second appointment occupies the 09:30 slot.
+    AppointmentController.book(pat, doc, _SLOT_930)
+    with pytest.raises(SehatyConflictError):
+        AppointmentController.reschedule(pat, UserRole.PATIENT, appt_id, _SLOT_930)
+
+
+def test_reschedule_completed_conflicts(db: sessionmaker[Session]) -> None:
+    doc, pat, appt_id = _fresh_appointment(db)
+    AppointmentController.transition(doc, UserRole.DOCTOR, appt_id, AppointmentStatus.CONFIRMED)
+    AppointmentController.transition(doc, UserRole.DOCTOR, appt_id, AppointmentStatus.COMPLETED)
+    with pytest.raises(SehatyConflictError):
+        AppointmentController.reschedule(pat, UserRole.PATIENT, appt_id, _SLOT_930)
+
+
+def test_reschedule_cancelled_conflicts(db: sessionmaker[Session]) -> None:
+    _doc, pat, appt_id = _fresh_appointment(db)
+    AppointmentController.transition(pat, UserRole.PATIENT, appt_id, AppointmentStatus.CANCELLED)
+    with pytest.raises(SehatyConflictError):
+        AppointmentController.reschedule(pat, UserRole.PATIENT, appt_id, _SLOT_930)
+
+
+def test_reschedule_wrong_patient_forbidden(db: sessionmaker[Session]) -> None:
+    _doc, _pat, appt_id = _fresh_appointment(db)
+    stranger = _seed_patient(db, email="stranger@clinic.ma")
+    with pytest.raises(SehatyForbiddenError):
+        AppointmentController.reschedule(stranger, UserRole.PATIENT, appt_id, _SLOT_930)
+
+
+def test_reschedule_wrong_doctor_forbidden(db: sessionmaker[Session]) -> None:
+    _doc, _pat, appt_id = _fresh_appointment(db)
+    other_doc = _seed_doctor(db, email="other-doc@clinic.ma")
+    with pytest.raises(SehatyForbiddenError):
+        AppointmentController.reschedule(other_doc, UserRole.DOCTOR, appt_id, _SLOT_930)
+
+
+def test_reschedule_to_same_slot_is_noop(db: sessionmaker[Session]) -> None:
+    doc, pat, appt_id = _fresh_appointment(db)
+    AppointmentController.transition(doc, UserRole.DOCTOR, appt_id, AppointmentStatus.CONFIRMED)
+    a = AppointmentController.reschedule(pat, UserRole.PATIENT, appt_id, _SLOT_9)
+    # Unchanged: same slot, status preserved, no reschedule audit emitted. The
+    # no-op returns the DB-loaded row (naive-UTC under SQLite), so compare the
+    # wall clock rather than the tzinfo.
+    assert a.start_at.replace(tzinfo=None) == _SLOT_9.replace(tzinfo=None)
+    assert a.status == AppointmentStatus.CONFIRMED
+    with db() as s:
+        actions = list(
+            s.execute(select(AuditLog.action).where(AuditLog.entity_id == appt_id)).scalars()
+        )
+    assert "APPT_RESCHEDULED" not in actions
