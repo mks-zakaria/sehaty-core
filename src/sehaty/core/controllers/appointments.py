@@ -7,6 +7,7 @@ Every booking and transition writes an immutable ``AuditLog`` entry. Failures
 raise the ``SehatyError`` taxonomy; methods never return ``None`` for an error.
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sehaty.db import Appointment, AppointmentStatus, AuditLog, ClinicPatient, User, UserRole
@@ -18,6 +19,25 @@ from sehaty.core.errors import (
     SehatyForbiddenError,
 )
 from sehaty.core.services.slots import find_slot_end
+
+
+@dataclass(frozen=True)
+class AppointmentGridRow:
+    """One appointment in a doctor's booking-slot grid (detached projection).
+
+    ``patient_name`` is always human-readable: it never surfaces a bare id when
+    any contact detail exists (see ``AppointmentController.list_for_doctor``).
+    """
+
+    id: int
+    clinic_patient_id: int | None
+    patient_name: str
+    patient_phone: str | None
+    start_at: datetime
+    end_at: datetime
+    status: str
+    reason: str | None
+
 
 # Allowed status transitions per role. A transition is legal iff the target
 # status is in the set keyed by the appointment's current status.
@@ -137,6 +157,82 @@ class AppointmentController:
         stmt = stmt.order_by(Appointment.start_at)
         with get_session() as session:
             return list(session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def list_for_doctor(
+        doctor_id: int,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> list["AppointmentGridRow"]:
+        """List a doctor's appointments with a human-readable patient name.
+
+        Powers the booking-slot grid. One column-only ``select(...)`` left-joins
+        each appointment to the doctor's patient register (:class:`ClinicPatient`
+        on ``clinic_patient_id``) AND to the booking :class:`User` (on
+        ``patient_id``), selecting only scalar columns — no PostGIS ``geopoint`` —
+        so it runs on SQLite (tests) and Postgres alike.
+
+        ``patient_name`` resolves down a fallback chain so the grid always shows
+        something human: the linked register row's ``full_name``, else its
+        ``email`` / ``phone``, else the booking user's ``email`` / ``phone``, else
+        ``"Patient #{patient_id}"``. ``patient_phone`` prefers the register row's
+        phone, then the user's.
+
+        ``date_from`` / ``date_to`` (datetimes), when given, filter ``start_at``
+        into the half-open ``[date_from, date_to)`` interval. Ordered by
+        ``start_at`` (then ``id`` for a stable tie-break).
+        """
+        stmt = (
+            select(
+                Appointment.id,
+                Appointment.clinic_patient_id,
+                Appointment.patient_id,
+                Appointment.start_at,
+                Appointment.end_at,
+                Appointment.status,
+                Appointment.reason,
+                ClinicPatient.full_name.label("cp_full_name"),
+                ClinicPatient.email.label("cp_email"),
+                ClinicPatient.phone.label("cp_phone"),
+                User.email.label("user_email"),
+                User.phone.label("user_phone"),
+            )
+            .outerjoin(ClinicPatient, Appointment.clinic_patient_id == ClinicPatient.id)
+            .outerjoin(User, Appointment.patient_id == User.id)
+            .where(Appointment.doctor_id == doctor_id)
+        )
+        if date_from is not None:
+            stmt = stmt.where(Appointment.start_at >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(Appointment.start_at < date_to)
+        stmt = stmt.order_by(Appointment.start_at, Appointment.id)
+
+        with get_session() as session:
+            rows = session.execute(stmt).all()
+
+        grid: list[AppointmentGridRow] = []
+        for row in rows:
+            name = (
+                row.cp_full_name
+                or row.cp_email
+                or row.cp_phone
+                or row.user_email
+                or row.user_phone
+                or f"Patient #{row.patient_id}"
+            )
+            grid.append(
+                AppointmentGridRow(
+                    id=row.id,
+                    clinic_patient_id=row.clinic_patient_id,
+                    patient_name=name,
+                    patient_phone=row.cp_phone or row.user_phone,
+                    start_at=row.start_at,
+                    end_at=row.end_at,
+                    status=str(row.status),
+                    reason=row.reason,
+                )
+            )
+        return grid
 
     @staticmethod
     def transition(
