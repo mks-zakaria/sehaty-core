@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.18.1 (2026-07-15)
+
+### Bug Fixes
+
+- Compute patient detail no_show_count live to match the list
+  ([#40](https://github.com/mks-zakaria/sehaty-core/pull/40),
+  [`b7650fd`](https://github.com/mks-zakaria/sehaty-core/commit/b7650fdfc382f68896d2273d667cd7bd78f1a4ad))
+
+
 ## v1.18.0 (2026-07-15)
 
 ### Features
