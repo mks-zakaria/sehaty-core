@@ -60,6 +60,7 @@ class PatientAppointmentRow:
     id: int
     doctor_id: int
     doctor_name: str
+    doctor_slug: str | None
     start_at: datetime
     end_at: datetime
     status: str
@@ -283,7 +284,10 @@ class AppointmentController:
 
         ``doctor_name`` resolves to the profile's ``full_name``, falling back to
         ``"Doctor #{doctor_id}"`` when the doctor has no profile or an empty
-        name. Ordered by ``start_at`` (then ``id`` for a stable tie-break).
+        name. ``doctor_slug`` carries the profile's ``slug`` (``None`` when the
+        doctor has no profile) so the patient app can deep-link to the doctor and
+        load reschedule slots. Ordered by ``start_at`` (then ``id`` for a stable
+        tie-break).
         """
         stmt = (
             select(
@@ -294,6 +298,7 @@ class AppointmentController:
                 Appointment.status,
                 Appointment.reason,
                 DoctorProfile.full_name.label("doctor_full_name"),
+                DoctorProfile.slug.label("doctor_slug"),
             )
             .outerjoin(DoctorProfile, DoctorProfile.user_id == Appointment.doctor_id)
             .where(Appointment.patient_id == patient_user_id)
@@ -311,6 +316,7 @@ class AppointmentController:
                     id=row.id,
                     doctor_id=row.doctor_id,
                     doctor_name=name,
+                    doctor_slug=row.doctor_slug,
                     start_at=row.start_at,
                     end_at=row.end_at,
                     status=str(row.status),
