@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.22.0 (2026-07-15)
+
+### Features
+
+- Add doctor appointment-grid list with patient names
+  ([#48](https://github.com/mks-zakaria/sehaty-core/pull/48),
+  [`6a82f69`](https://github.com/mks-zakaria/sehaty-core/commit/6a82f699dba257e888b7cc16559b8acada118c88))
+
+
 ## v1.21.0 (2026-07-15)
 
 ### Features
