@@ -29,6 +29,7 @@ from sehaty.db import (
 )
 from sehaty.db.base import SehatyBase
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -273,6 +274,46 @@ def test_double_booking_conflicts(db: sessionmaker[Session]) -> None:
     AppointmentController.book(pat1, doc, start)
     with pytest.raises(SehatyConflictError):
         AppointmentController.book(pat2, doc, start)
+
+
+def test_booking_race_integrity_error_becomes_conflict(
+    db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A concurrent booking that loses the DB race surfaces as a clean Conflict.
+
+    In production Postgres enforces ``appointments_no_overlap`` (an EXCLUDE
+    constraint) so two bookings that both clear the ``find_slot_end`` fast-path
+    pre-check collide at flush, and the loser's insert raises
+    ``sqlalchemy.exc.IntegrityError``. SQLite has no such constraint, so we
+    simulate the race by monkeypatching ``Session.flush`` to raise an
+    IntegrityError naming the overlap constraint precisely when the pending
+    appointment row is about to be flushed. ``book()`` must catch it and raise
+    ``SehatyConflictError`` rather than leaking the raw driver error.
+    """
+    doc = _seed_doctor(db)
+    pat = _seed_patient(db)
+    AvailabilityController.add(doc, 0, time(9, 0), time(12, 0), 30)
+    start = datetime(2026, 8, 3, 9, 0, tzinfo=UTC)
+
+    original_flush = Session.flush
+
+    def flush_raising_on_appointment(self: Session, *args: object, **kwargs: object) -> None:
+        # Only the appointment insert (the constrained row) trips the constraint;
+        # every other flush in book() proceeds normally.
+        if any(isinstance(obj, Appointment) for obj in self.new):
+            raise IntegrityError(
+                "INSERT INTO appointments ...",
+                {},
+                Exception(
+                    'conflicting key value violates exclusion constraint "appointments_no_overlap"'
+                ),
+            )
+        return original_flush(self, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "flush", flush_raising_on_appointment)
+
+    with pytest.raises(SehatyConflictError):
+        AppointmentController.book(pat, doc, start)
 
 
 def test_list_for_scopes_by_role(db: sessionmaker[Session]) -> None:
