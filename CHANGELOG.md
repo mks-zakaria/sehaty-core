@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.33.0 (2026-07-16)
+
+### Features
+
+- Add doctor analytics (monthly appointments, no-show rate, estimated revenue, review trend)
+  ([#70](https://github.com/mks-zakaria/sehaty-core/pull/70),
+  [`16dd002`](https://github.com/mks-zakaria/sehaty-core/commit/16dd002a0d1364ed200d15c3af9a59a485bee91b))
+
+
 ## v1.32.0 (2026-07-16)
 
 ### Features
