@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.34.0 (2026-07-16)
+
+### Features
+
+- Add messaging controller ([#72](https://github.com/mks-zakaria/sehaty-core/pull/72),
+  [`eeb4325`](https://github.com/mks-zakaria/sehaty-core/commit/eeb4325ca6c2e5a4922cafbcf2b7468029177fdb))
+
+
 ## v1.33.0 (2026-07-16)
 
 ### Features
