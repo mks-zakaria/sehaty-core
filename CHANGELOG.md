@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.32.0 (2026-07-16)
+
+### Features
+
+- Add doctor directory (browse by specialty and rating)
+  ([#68](https://github.com/mks-zakaria/sehaty-core/pull/68),
+  [`6512ae3`](https://github.com/mks-zakaria/sehaty-core/commit/6512ae3b69e74e75a24dd6822c512d5326911f38))
+
+
 ## v1.31.0 (2026-07-15)
 
 ### Features
