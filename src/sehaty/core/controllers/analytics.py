@@ -30,7 +30,6 @@ Two documented simplifications:
   truth for actual collections.
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sehaty.db import (
@@ -44,11 +43,11 @@ from sehaty.db import (
 )
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 
 
-@dataclass(frozen=True)
-class MonthStat:
+class MonthStat(DomainModel):
     """One calendar month of appointment activity for a doctor (detached).
 
     ``month`` is the UTC year-month key ``"YYYY-MM"``. ``total`` counts every
@@ -66,16 +65,14 @@ class MonthStat:
     estimated_revenue: float
 
 
-@dataclass(frozen=True)
-class MonthCount:
+class MonthCount(DomainModel):
     """A published-review count for one UTC calendar month (detached)."""
 
     month: str
     count: int
 
 
-@dataclass(frozen=True)
-class DoctorAnalytics:
+class DoctorAnalytics(DomainModel):
     """Practice-insights trend for one doctor over a rolling window (detached).
 
     * ``by_month`` — one :class:`MonthStat` per month in the window, oldest to
