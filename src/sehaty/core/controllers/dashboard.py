@@ -17,20 +17,19 @@ engine and on Postgres alike.
 simple, portable, and good enough for a home-page summary; it is documented as such.
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sehaty.db import Appointment, AppointmentStatus, ClinicPatient, User
 from sqlalchemy import case, func, select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 
 # Statuses that count as a live, upcoming appointment (awaiting or confirmed).
 _UPCOMING = (AppointmentStatus.REQUESTED, AppointmentStatus.CONFIRMED)
 
 
-@dataclass(frozen=True)
-class NextAppointment:
+class NextAppointment(DomainModel):
     """The doctor's soonest upcoming appointment (detached projection).
 
     ``patient_name`` resolves like ``AppointmentController.list_for_doctor``: the
@@ -43,8 +42,7 @@ class NextAppointment:
     patient_name: str
 
 
-@dataclass(frozen=True)
-class DoctorDashboard:
+class DoctorDashboard(DomainModel):
     """At-a-glance home-page stats for one doctor (detached projection).
 
     * ``today_total`` — appointments whose ``start_at`` falls on today's UTC

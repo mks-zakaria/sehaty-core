@@ -15,17 +15,17 @@ upsert the singleton/named row. All IO flows through ``get_session``; failures
 raise the ``SehatyError`` taxonomy, never a ``None`` sentinel.
 """
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 
 from sehaty.db import FeatureFlag, RankingWeights, User, UserRole
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyForbiddenError, SehatyValidationError
 
 
-@dataclass(frozen=True)
-class RankingWeightsValues:
+class RankingWeightsValues(DomainModel):
     """Detached, immutable snapshot of the ranking weights.
 
     Field names + defaults mirror the ``ranking_weights`` columns exactly, so a
@@ -41,7 +41,7 @@ class RankingWeightsValues:
 
 
 # The tunable weight column names (single source of truth for validation).
-_WEIGHT_FIELDS: frozenset[str] = frozenset(f.name for f in fields(RankingWeightsValues))
+_WEIGHT_FIELDS: frozenset[str] = frozenset(RankingWeightsValues.model_fields)
 
 
 @dataclass(frozen=True)
