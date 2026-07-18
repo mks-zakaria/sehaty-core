@@ -14,12 +14,12 @@ the ``SehatyError`` taxonomy; methods never return ``None`` to signal an error.
 All IO flows through ``get_session``.
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 
 from sehaty.db import PracticeProfile
 from sqlalchemy import select, update
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 
@@ -39,8 +39,7 @@ _WRITABLE = (
 )
 
 
-@dataclass(frozen=True)
-class PracticeProfileRow:
+class PracticeProfileRow(DomainModel):
     """A doctor's letterhead (detached, column-only projection)."""
 
     id: int

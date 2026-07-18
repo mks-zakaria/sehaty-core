@@ -18,7 +18,6 @@ flows through ``get_session``.
 """
 
 import secrets
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sehaty.db import (
@@ -31,6 +30,7 @@ from sehaty.db import (
 )
 from sqlalchemy import func, select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.controllers.practice import (
     PracticeProfileController,
     PracticeProfileRow,
@@ -50,8 +50,7 @@ _QR_BYTES = 16
 _DEFAULT_EXPIRES_DAYS = 90
 
 
-@dataclass(frozen=True)
-class PrescriptionItemRow:
+class PrescriptionItemRow(DomainModel):
     """One line of a prescription (detached; ``drug_name`` already resolved)."""
 
     drug_name: str | None
@@ -62,8 +61,7 @@ class PrescriptionItemRow:
     instructions: str | None
 
 
-@dataclass(frozen=True)
-class PrescriptionSummary:
+class PrescriptionSummary(DomainModel):
     """A prescription row for a list view (detached, column-only projection)."""
 
     id: int
@@ -74,8 +72,7 @@ class PrescriptionSummary:
     item_count: int
 
 
-@dataclass(frozen=True)
-class PrescriptionDetail:
+class PrescriptionDetail(DomainModel):
     """A prescription with its items and (on ``get``) the letterhead snapshot."""
 
     id: int

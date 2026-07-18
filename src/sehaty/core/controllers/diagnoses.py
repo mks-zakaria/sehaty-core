@@ -15,13 +15,13 @@ ORM objects), so callers hold detached, serialisable data. Failures raise the
 ``SehatyError`` taxonomy; methods never return ``None`` to signal an error.
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 
 from sehaty.db import ClinicPatient, Diagnosis
 from sehaty.db.base import utcnow
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 
@@ -29,8 +29,7 @@ from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 _UPDATABLE = ("label", "icd10", "notes", "appointment_id", "diagnosed_at")
 
 
-@dataclass(frozen=True)
-class DiagnosisRow:
+class DiagnosisRow(DomainModel):
     """One diagnosis as a detached projection."""
 
     id: int
