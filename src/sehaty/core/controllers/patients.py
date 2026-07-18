@@ -20,12 +20,12 @@ status-conditional counts — portable on both SQLite (tests) and Postgres
 ``SehatyError`` taxonomy; methods never return ``None`` to signal an error.
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sehaty.db import Appointment, AppointmentStatus, ClinicPatient
 from sqlalchemy import case, func, select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 
@@ -40,8 +40,7 @@ _SORTS = frozenset({"name", "recent", "visits", "upcoming"})
 _UPDATABLE = ("full_name", "phone", "email", "sex", "birth_year", "notes", "tags")
 
 
-@dataclass(frozen=True)
-class PatientRow:
+class PatientRow(DomainModel):
     """One row of the patient-register grid (detached, aggregated projection)."""
 
     id: int
@@ -58,8 +57,7 @@ class PatientRow:
     created_at: datetime
 
 
-@dataclass(frozen=True)
-class VisitRow:
+class VisitRow(DomainModel):
     """One appointment in a patient's visit history (detached projection)."""
 
     appointment_id: int
@@ -70,8 +68,7 @@ class VisitRow:
     notes: str | None
 
 
-@dataclass(frozen=True)
-class PatientDetail:
+class PatientDetail(DomainModel):
     """A single register row with full demographics + visit history."""
 
     id: int
