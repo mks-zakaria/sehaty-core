@@ -10,16 +10,14 @@ ordered by English name, and ``seed_defaults`` idempotently plants the built-in
 Moroccan specialties (each localized in EN / FR / AR).
 """
 
-from dataclasses import dataclass
-
 from sehaty.db import Specialty
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 
 
-@dataclass(frozen=True)
-class SpecialtyView:
+class SpecialtyView(DomainModel):
     """A read-only projection of one catalogue row."""
 
     id: int

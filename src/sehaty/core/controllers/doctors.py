@@ -15,7 +15,6 @@ Geo notes (GeoAlchemy2 over the PostGIS ``geopoint`` Geography column):
 """
 
 import re
-from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -31,6 +30,7 @@ from sehaty.db import (
 )
 from sqlalchemy import cast, delete, func, select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 from sehaty.core.services import doctors as doctor_service
@@ -40,8 +40,7 @@ _MAX_LIMIT = 100
 _SRID = 4326
 
 
-@dataclass(frozen=True)
-class SpecialtyRef:
+class SpecialtyRef(DomainModel):
     """One specialty a doctor is tagged with (localized names)."""
 
     slug: str
@@ -50,8 +49,7 @@ class SpecialtyRef:
     name_ar: str
 
 
-@dataclass(frozen=True)
-class DoctorView:
+class DoctorView(DomainModel):
     """Public, read-only projection of a doctor's profile.
 
     The raw PostGIS ``geopoint`` is never exposed: coordinates arrive as plain

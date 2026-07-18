@@ -25,8 +25,7 @@ completed appointment (freshly-active doctors rank higher). Held at 0 until the
 scheduling read lands so the score stays deterministic.
 """
 
-from dataclasses import dataclass
-
+from sehaty.core._dto import DomainModel
 from sehaty.core.controllers.config import ConfigController, RankingWeightsValues
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyValidationError
@@ -60,8 +59,7 @@ def score_doctor(
     )
 
 
-@dataclass(frozen=True)
-class DoctorSearchResult:
+class DoctorSearchResult(DomainModel):
     """A ranked search hit ready for the transport layer."""
 
     slug: str
