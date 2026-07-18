@@ -17,18 +17,17 @@ dataclass projections (never ORM objects). Failures raise the ``SehatyError``
 taxonomy; all IO flows through ``get_session``.
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 
 from sehaty.db import PrescriptionTemplate
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 
 
-@dataclass(frozen=True)
-class TemplateItem:
+class TemplateItem(DomainModel):
     """One freehand medication row of a template (detached projection)."""
 
     drug_name: str
@@ -38,8 +37,7 @@ class TemplateItem:
     instructions: str | None
 
 
-@dataclass(frozen=True)
-class TemplateRow:
+class TemplateRow(DomainModel):
     """A prescription template as a detached projection (items already resolved)."""
 
     id: int

@@ -7,18 +7,17 @@ day (or a time range within it), ``OPEN`` adds a one-off window. These feed
 methods never return ``None`` to signal an error.
 """
 
-from dataclasses import dataclass
 from datetime import date, time
 
 from sehaty.db import AvailabilityException, AvailabilityExceptionKind
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 
 
-@dataclass(frozen=True)
-class ExceptionRow:
+class ExceptionRow(DomainModel):
     """One availability exception (detached projection)."""
 
     id: int
