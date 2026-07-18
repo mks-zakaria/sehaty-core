@@ -40,6 +40,7 @@ from sehaty.db.scheduling import Appointment
 from sehaty.db.users import DoctorProfile
 from sqlalchemy import func, select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 
 # Sehaty bills in a single currency; cash is the only rail it tracks.
@@ -47,8 +48,7 @@ _CURRENCY = "MAD"
 _CASH = "CASH"
 
 
-@dataclass(frozen=True)
-class PlatformKpis:
+class PlatformKpis(DomainModel):
     """Operational marketplace snapshot (detached, count-only projection)."""
 
     doctors_total: int
@@ -60,8 +60,7 @@ class PlatformKpis:
     active_subscriptions: int
 
 
-@dataclass(frozen=True)
-class MonthRevenue:
+class MonthRevenue(DomainModel):
     """Cash collected in one calendar month of a fiscal year."""
 
     month: int
@@ -69,8 +68,7 @@ class MonthRevenue:
     payments: int
 
 
-@dataclass(frozen=True)
-class RevenueSummary:
+class RevenueSummary(DomainModel):
     """A fiscal year's cash picture (collected + recurring run-rate)."""
 
     year: int
