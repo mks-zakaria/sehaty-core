@@ -25,6 +25,7 @@ from datetime import datetime
 from sehaty.db import DoctorAssistant, DoctorProfile, User, UserRole
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import (
     SehatyConflictError,
@@ -35,8 +36,7 @@ from sehaty.core.errors import (
 from sehaty.core.security import hash_password
 
 
-@dataclass(frozen=True)
-class AssistantRow:
+class AssistantRow(DomainModel):
     """One assistant account (detached, column-only projection).
 
     ``id`` is the assistant's ``User`` id. ``full_name`` has no column on a plain
@@ -61,8 +61,7 @@ class MembershipRow:
     is_active: bool
 
 
-@dataclass(frozen=True)
-class DoctorRef:
+class DoctorRef(DomainModel):
     """A doctor an assistant works for (id + display name and slug from the profile)."""
 
     doctor_id: int
