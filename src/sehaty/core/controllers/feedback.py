@@ -18,7 +18,6 @@ small frozen dataclass projections (never ORM objects). Failures raise the
 ``SehatyError`` taxonomy; methods never return ``None`` to signal an error.
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 
 from sehaty.db import (
@@ -31,6 +30,7 @@ from sehaty.db import (
 )
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import (
     SehatyForbiddenError,
@@ -46,8 +46,7 @@ _TARGET_MODELS = {
 }
 
 
-@dataclass(frozen=True)
-class FeedbackRow:
+class FeedbackRow(DomainModel):
     """One treatment-feedback entry as a detached projection."""
 
     id: int
