@@ -21,7 +21,6 @@ a message advances the *sender's* own watermark (you have read up to what you ju
 wrote); opening a thread advances the *viewer's* side watermark to now.
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 
 from sehaty.db import (
@@ -38,6 +37,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import (
     SehatyForbiddenError,
@@ -51,8 +51,7 @@ _MAX_BODY = 4000
 _PREVIEW_LEN = 140
 
 
-@dataclass(frozen=True)
-class MessageView:
+class MessageView(DomainModel):
     """One message, detached; ``mine`` is relative to the requesting user."""
 
     id: int
@@ -63,8 +62,7 @@ class MessageView:
     mine: bool
 
 
-@dataclass(frozen=True)
-class ThreadView:
+class ThreadView(DomainModel):
     """An inbox row: the thread plus display names, unread count and preview.
 
     ``unread`` and ``last_message_preview`` are computed for the side that asked
@@ -81,8 +79,7 @@ class ThreadView:
     last_message_preview: str | None
 
 
-@dataclass(frozen=True)
-class ThreadDetail:
+class ThreadDetail(DomainModel):
     """A full conversation: the thread header + its messages oldest->newest."""
 
     thread: ThreadView
