@@ -14,7 +14,6 @@ Failures raise the ``SehatyError`` taxonomy; methods never return ``None`` to
 signal an error. All IO flows through ``get_session``.
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sehaty.db import (
@@ -31,6 +30,7 @@ from sehaty.db import (
 )
 from sqlalchemy import func, select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import (
     SehatyForbiddenError,
@@ -49,8 +49,7 @@ _CURRENCY = "MAD"
 _PERIOD = timedelta(days=30)
 
 
-@dataclass(frozen=True)
-class SubscriptionSummary:
+class SubscriptionSummary(DomainModel):
     """A doctor's current billing picture (detached, column-only projection)."""
 
     plan: str | None
