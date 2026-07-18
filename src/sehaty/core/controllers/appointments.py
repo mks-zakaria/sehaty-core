@@ -7,7 +7,6 @@ Every booking and transition writes an immutable ``AuditLog`` entry. Failures
 raise the ``SehatyError`` taxonomy; methods never return ``None`` for an error.
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sehaty.db import (
@@ -19,9 +18,11 @@ from sehaty.db import (
     User,
     UserRole,
 )
+from pydantic import Field
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import (
     SehatyConflictError,
@@ -30,8 +31,7 @@ from sehaty.core.errors import (
 from sehaty.core.services.slots import _as_utc, find_slot_end
 
 
-@dataclass(frozen=True)
-class AppointmentGridRow:
+class AppointmentGridRow(DomainModel):
     """One appointment in a doctor's booking-slot grid (detached projection).
 
     ``patient_name`` is always human-readable: it never surfaces a bare id when
@@ -44,12 +44,11 @@ class AppointmentGridRow:
     patient_phone: str | None
     start_at: datetime
     end_at: datetime
-    status: str
+    status: AppointmentStatus
     reason: str | None
 
 
-@dataclass(frozen=True)
-class PatientAppointmentRow:
+class PatientAppointmentRow(DomainModel):
     """One appointment in a patient's own list (detached projection).
 
     ``doctor_name`` is always human-readable: it resolves from the doctor's
@@ -63,8 +62,29 @@ class PatientAppointmentRow:
     doctor_slug: str | None
     start_at: datetime
     end_at: datetime
-    status: str
+    status: AppointmentStatus
     reason: str | None
+
+
+class AppointmentRow(DomainModel):
+    """A single appointment as seen by its patient or doctor (detached projection).
+
+    The plain, id-based view (no resolved names) returned by
+    :meth:`AppointmentController.book` / :meth:`list_for` / :meth:`transition` /
+    :meth:`reschedule` — the transport layer serialises it directly.
+    """
+
+    id: int
+    patient_id: int
+    doctor_id: int
+    # Carried for callers (e.g. register-linking checks) but never serialised —
+    # the wire contract never exposed the doctor's patient-register row id.
+    clinic_patient_id: int | None = Field(default=None, exclude=True)
+    start_at: datetime
+    end_at: datetime
+    status: AppointmentStatus
+    reason: str | None
+    notes: str | None
 
 
 # Allowed status transitions per role. A transition is legal iff the target
@@ -90,7 +110,7 @@ class AppointmentController:
         doctor_id: int,
         start_at: datetime,
         reason: str | None = None,
-    ) -> Appointment:
+    ) -> AppointmentRow:
         """Book a free slot for a patient and record a ``BOOK`` audit entry.
 
         Validates ``start_at`` is a genuine free slot for the doctor; raises
@@ -177,10 +197,10 @@ class AppointmentController:
             )
         except Exception:
             pass
-        return appt
+        return AppointmentRow.model_validate(appt)
 
     @staticmethod
-    def list_for(user_id: int, role: UserRole) -> list[Appointment]:
+    def list_for(user_id: int, role: UserRole) -> list[AppointmentRow]:
         """List a user's appointments, ordered by start time.
 
         A patient sees the appointments they booked; a doctor sees the ones on
@@ -195,7 +215,7 @@ class AppointmentController:
             return []
         stmt = stmt.order_by(Appointment.start_at)
         with get_session() as session:
-            return list(session.execute(stmt).scalars().all())
+            return [AppointmentRow.model_validate(a) for a in session.execute(stmt).scalars().all()]
 
     @staticmethod
     def list_for_doctor(
@@ -267,7 +287,7 @@ class AppointmentController:
                     patient_phone=row.cp_phone or row.user_phone,
                     start_at=row.start_at,
                     end_at=row.end_at,
-                    status=str(row.status),
+                    status=row.status,
                     reason=row.reason,
                 )
             )
@@ -319,7 +339,7 @@ class AppointmentController:
                     doctor_slug=row.doctor_slug,
                     start_at=row.start_at,
                     end_at=row.end_at,
-                    status=str(row.status),
+                    status=row.status,
                     reason=row.reason,
                 )
             )
@@ -332,7 +352,7 @@ class AppointmentController:
         appointment_id: int,
         new_status: AppointmentStatus,
         notes: str | None = None,
-    ) -> Appointment:
+    ) -> AppointmentRow:
         """Move an appointment to ``new_status`` under the role-based matrix.
 
         Only the owning doctor or patient may act (else ``SehatyForbiddenError``)
@@ -387,7 +407,7 @@ class AppointmentController:
             )
         except Exception:
             pass
-        return appt
+        return AppointmentRow.model_validate(appt)
 
     @staticmethod
     def reschedule(
@@ -396,7 +416,7 @@ class AppointmentController:
         appointment_id: int,
         new_start_at: datetime,
         notes: str | None = None,
-    ) -> Appointment:
+    ) -> AppointmentRow:
         """Move an existing appointment to a different free slot.
 
         A first-class alternative to cancel + rebook: the same appointment row is
@@ -454,7 +474,7 @@ class AppointmentController:
                 if notes is not None:
                     appt.notes = notes
                     session.flush()
-                return appt
+                return AppointmentRow.model_validate(appt)
 
             new_end_at = find_slot_end(session, doctor_id, new_start_at)
             if new_end_at is None:
@@ -504,7 +524,7 @@ class AppointmentController:
             )
         except Exception:
             pass
-        return appt
+        return AppointmentRow.model_validate(appt)
 
     @staticmethod
     def run_reminders(within_hours: int = 24, now: datetime | None = None) -> int:
