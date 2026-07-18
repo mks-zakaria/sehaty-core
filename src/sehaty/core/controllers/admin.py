@@ -10,18 +10,17 @@ lacks — see the shims in the auth tests). Failures raise the ``SehatyError``
 taxonomy; methods never return ``None`` to signal an error.
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 
 from sehaty.db import AuditLog, DoctorProfile, Plan, Subscription, User, VerificationStatus
 from sqlalchemy import select, update
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError
 
 
-@dataclass(frozen=True)
-class PendingProfessional:
+class PendingProfessional(DomainModel):
     """A doctor awaiting accreditation (column-only projection, no geopoint)."""
 
     user_id: int
@@ -32,8 +31,7 @@ class PendingProfessional:
     email: str
 
 
-@dataclass(frozen=True)
-class UserRow:
+class UserRow(DomainModel):
     """One row of the admin Users page (column-only projection, no geopoint).
 
     ``full_name`` comes from the doctor's profile via an outer join and is
@@ -49,8 +47,7 @@ class UserRow:
     created_at: datetime
 
 
-@dataclass(frozen=True)
-class SubscriptionRow:
+class SubscriptionRow(DomainModel):
     """One row of the admin Subscriptions page (detached, column-only).
 
     Joins the subscription to its ``Plan`` and (by ``doctor_id``) to the

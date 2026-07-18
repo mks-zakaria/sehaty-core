@@ -15,8 +15,6 @@ review-less doctor still appears (rating term zero). Each page's specialty names
 are resolved in a single follow-up query keyed by doctor id (no N+1).
 """
 
-from dataclasses import dataclass
-
 from sehaty.db import (
     DoctorProfile,
     DoctorSpecialty,
@@ -27,6 +25,7 @@ from sehaty.db import (
 )
 from sqlalchemy import func, select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyValidationError
 
@@ -35,8 +34,7 @@ _MAX_LIMIT = 100
 _VALID_SORTS = ("rating", "reviews", "name")
 
 
-@dataclass(frozen=True)
-class DirectoryRow:
+class DirectoryRow(DomainModel):
     """One doctor in the directory listing (no geo)."""
 
     slug: str
@@ -49,8 +47,7 @@ class DirectoryRow:
     specialties: list[str]
 
 
-@dataclass(frozen=True)
-class DirectoryPage:
+class DirectoryPage(DomainModel):
     """A page of directory rows plus the total match count for pagination."""
 
     total: int
