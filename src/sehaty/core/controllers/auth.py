@@ -104,6 +104,30 @@ class AuthController:
             return MeView.model_validate(user)
 
     @staticmethod
+    def register_pharmacy(
+        *, email: str, password: str, phone: str | None = None
+    ) -> MeView:
+        """Create a PHARMACY ``User`` (no profile) and return its :class:`MeView`."""
+        if not email.strip() or not password:
+            raise SehatyValidationError("email and password are required")
+        with get_session() as session:
+            exists = session.execute(
+                select(User.id).where(User.email == email)
+            ).scalar_one_or_none()
+            if exists is not None:
+                raise SehatyConflictError("email already registered")
+            user = User(
+                email=email,
+                phone=phone,
+                password_hash=hash_password(password),
+                role=UserRole.PHARMACY,
+                is_active=True,
+            )
+            session.add(user)
+            session.flush()
+            return MeView.model_validate(user)
+
+    @staticmethod
     def login(email: str, password: str, user_agent: str | None = None) -> dict:
         """Verify email/password and issue access + refresh tokens.
 
