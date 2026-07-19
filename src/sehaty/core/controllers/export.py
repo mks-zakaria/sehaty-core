@@ -18,7 +18,9 @@ from sehaty.db import (
     ClinicPatient,
     Diagnosis,
     Invoice,
+    Medication,
     Prescription,
+    PrescriptionItem,
     Review,
     ReviewDirection,
 )
@@ -57,9 +59,9 @@ class ExportController:
 
         Sheets: Patients (the register), Appointments, Consultations (appointments
         the doctor actually started/finished, with the recorded encounter),
-        Diagnoses, Prescriptions, Reviews (patient reviews about the doctor), and
-        Billing (the doctor's invoices). All are scoped to ``doctor_id`` and
-        ordered newest-first.
+        Diagnoses, Prescriptions, Prescription Items (one row per drug line),
+        Reviews (patient reviews about the doctor), and Billing (the doctor's
+        invoices). All are scoped to ``doctor_id`` and ordered newest-first.
         """
         with get_session() as session:
             patients = ExportController._patients(session, doctor_id)
@@ -68,10 +70,12 @@ class ExportController:
             consultations = ExportController._consultations(session, doctor_id, names)
             diagnoses = ExportController._diagnoses(session, doctor_id, names)
             prescriptions = ExportController._prescriptions(session, doctor_id, names)
+            items = ExportController._prescription_items(session, doctor_id, names)
             reviews = ExportController._reviews(session, doctor_id)
             billing = ExportController._billing(session, doctor_id)
         return [
-            patients, appointments, consultations, diagnoses, prescriptions, reviews, billing,
+            patients, appointments, consultations, diagnoses,
+            prescriptions, items, reviews, billing,
         ]
 
     @staticmethod
@@ -205,6 +209,39 @@ class ExportController:
             for r in rows
         ]
         return ExportSheet("Prescriptions", cols, out)
+
+    @staticmethod
+    def _prescription_items(session, doctor_id: int, names: dict[int, str]) -> ExportSheet:
+        cols = [
+            "item_id", "prescription_code", "patient", "drug", "dosage",
+            "frequency", "duration_days", "quantity", "instructions",
+        ]
+        rows = session.execute(
+            select(
+                PrescriptionItem.id,
+                Prescription.code,
+                Prescription.clinic_patient_id,
+                PrescriptionItem.drug_name,
+                Medication.inn_name,
+                PrescriptionItem.dosage,
+                PrescriptionItem.frequency,
+                PrescriptionItem.duration_days,
+                PrescriptionItem.quantity,
+                PrescriptionItem.instructions,
+            )
+            .join(Prescription, PrescriptionItem.prescription_id == Prescription.id)
+            .outerjoin(Medication, PrescriptionItem.medication_id == Medication.id)
+            .where(Prescription.doctor_id == doctor_id)
+            .order_by(Prescription.issued_at.desc(), PrescriptionItem.id)
+        ).all()
+        out = [
+            [_cell(r.id), _cell(r.code), names.get(r.clinic_patient_id),
+             # A free-typed drug name, else the linked medication's INN name.
+             _cell(r.drug_name or r.inn_name), _cell(r.dosage), _cell(r.frequency),
+             _cell(r.duration_days), _cell(r.quantity), _cell(r.instructions)]
+            for r in rows
+        ]
+        return ExportSheet("Prescription Items", cols, out)
 
     @staticmethod
     def _reviews(session, doctor_id: int) -> ExportSheet:
