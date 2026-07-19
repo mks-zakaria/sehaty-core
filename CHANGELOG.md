@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.36.0 (2026-07-19)
+
+### Features
+
+- **core**: Active session lookup for a secretary's doctor
+  ([#111](https://github.com/mks-zakaria/sehaty-core/pull/111),
+  [`887d5ce`](https://github.com/mks-zakaria/sehaty-core/commit/887d5ce6b8886b5f0d78ea8ea075f2667105cb66))
+
+
 ## v1.35.0 (2026-07-19)
 
 ### Code Style
