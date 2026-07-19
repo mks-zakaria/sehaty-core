@@ -14,6 +14,7 @@ Two entry paths:
 from sehaty.db import DoctorProfile, RefreshToken, User, UserRole, VerificationStatus
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import (
     SehatyConflictError,
@@ -31,6 +32,21 @@ from sehaty.core.security import (
     verify_otp,
     verify_password,
 )
+
+
+class MeView(DomainModel):
+    """The authenticated user's public identity (detached projection).
+
+    Returned by :meth:`AuthController.register_doctor` and serialised by the
+    transport layer directly as a FastAPI ``response_model``. ``role`` is kept
+    typed ``str`` to preserve the exact wire contract the former ``MeOut`` DTO
+    exposed (the ``User`` ORM stores it as a :class:`UserRole` ``StrEnum``).
+    """
+
+    id: int
+    role: str
+    email: str | None
+    phone: str | None
 
 
 def _token_bundle(user: User, refresh: str) -> dict:
@@ -51,12 +67,12 @@ class AuthController:
         slug: str,
         license_no: str,
         phone: str | None = None,
-    ) -> User:
+    ) -> MeView:
         """Create a DOCTOR ``User`` + pending ``DoctorProfile``.
 
         The account is created unverified: the profile's
         ``verification_status`` starts ``PENDING`` (an admin later verifies the
-        licence). Returns the created (detached) ``User``.
+        licence). Returns the created user's detached :class:`MeView` projection.
         """
         if not email.strip() or not password:
             raise SehatyValidationError("email and password are required")
@@ -85,7 +101,7 @@ class AuthController:
                 )
             )
             session.flush()
-            return user
+            return MeView.model_validate(user)
 
     @staticmethod
     def login(email: str, password: str, user_agent: str | None = None) -> dict:
