@@ -2,6 +2,87 @@
 
 <!-- version list -->
 
+## v1.35.0 (2026-07-19)
+
+### Code Style
+
+- **core**: Sort imports in appointments controller
+  ([#107](https://github.com/mks-zakaria/sehaty-core/pull/107),
+  [`efd3bba`](https://github.com/mks-zakaria/sehaty-core/commit/efd3bbab9264a7cfaccf6870213a58564ff2b27f))
+
+### Features
+
+- **core**: Cabinet controller + consultation flow
+  ([#109](https://github.com/mks-zakaria/sehaty-core/pull/109),
+  [`2c69d77`](https://github.com/mks-zakaria/sehaty-core/commit/2c69d7796829d7b09bf5b8b5965188edf37df888))
+
+### Refactoring
+
+- **core**: Add DomainModel base for domain projections
+  ([#74](https://github.com/mks-zakaria/sehaty-core/pull/74),
+  [`4033a50`](https://github.com/mks-zakaria/sehaty-core/commit/4033a50c4608698f7c2978cd03b2798a49892319))
+
+- **core**: Promote analytics projections to DomainModel
+  ([#76](https://github.com/mks-zakaria/sehaty-core/pull/76),
+  [`da8cc1a`](https://github.com/mks-zakaria/sehaty-core/commit/da8cc1a33fee0a6cba52557036ff893e808e95d9))
+
+- **core**: Promote appointment projections to DomainModel (adds AppointmentRow)
+  ([#78](https://github.com/mks-zakaria/sehaty-core/pull/78),
+  [`7c776f6`](https://github.com/mks-zakaria/sehaty-core/commit/7c776f63d244f7bde8b0a3ae6520f40400ef3da9))
+
+- **core**: Promote availability-exception & prescription-template projections to DomainModel
+  ([#88](https://github.com/mks-zakaria/sehaty-core/pull/88),
+  [`45903c3`](https://github.com/mks-zakaria/sehaty-core/commit/45903c371ec2a54a7ebc73858f3baa76ac103b2f))
+
+- **core**: Promote billing & reporting projections to DomainModel
+  ([#84](https://github.com/mks-zakaria/sehaty-core/pull/84),
+  [`8fa3a4b`](https://github.com/mks-zakaria/sehaty-core/commit/8fa3a4b2166cd7299756b8884d6852f51f517c3d))
+
+- **core**: Promote clinical projections to DomainModel
+  ([#80](https://github.com/mks-zakaria/sehaty-core/pull/80),
+  [`c541c96`](https://github.com/mks-zakaria/sehaty-core/commit/c541c96fb6b7cd7b0b43e8bea1124aef8332684f))
+
+- **core**: Promote config & dashboard projections to DomainModel
+  ([#90](https://github.com/mks-zakaria/sehaty-core/pull/90),
+  [`44b70b6`](https://github.com/mks-zakaria/sehaty-core/commit/44b70b6a6011da83132ef6176050744263bd47a7))
+
+- **core**: Promote doctor/directory/admin projections to DomainModel
+  ([#92](https://github.com/mks-zakaria/sehaty-core/pull/92),
+  [`02107d8`](https://github.com/mks-zakaria/sehaty-core/commit/02107d8ea56b19a29ab16c589526a8da296cf1ec))
+
+- **core**: Promote messaging projections to DomainModel
+  ([#82](https://github.com/mks-zakaria/sehaty-core/pull/82),
+  [`8215ba2`](https://github.com/mks-zakaria/sehaty-core/commit/8215ba237d31b73df86b4cd13400d9afb3e77208))
+
+- **core**: Promote patient & assistant projections to DomainModel
+  ([#86](https://github.com/mks-zakaria/sehaty-core/pull/86),
+  [`71fe1f3`](https://github.com/mks-zakaria/sehaty-core/commit/71fe1f3a2b4a9da27f48a021a78f3ca3daade467))
+
+- **core**: Return AvailabilityRow projection instead of Availability ORM
+  ([#103](https://github.com/mks-zakaria/sehaty-core/pull/103),
+  [`f9ae2a1`](https://github.com/mks-zakaria/sehaty-core/commit/f9ae2a1e3ad06248145a1c36258d76505aacad44))
+
+- **core**: Return MeView projection from register_doctor
+  ([#106](https://github.com/mks-zakaria/sehaty-core/pull/106),
+  [`2ef71ea`](https://github.com/mks-zakaria/sehaty-core/commit/2ef71eaed59c15ba0ef9a166cdddfa434ea0da23))
+
+- **core**: Return NotificationRow projection instead of Notification ORM
+  ([#104](https://github.com/mks-zakaria/sehaty-core/pull/104),
+  [`0800d30`](https://github.com/mks-zakaria/sehaty-core/commit/0800d305fca83e3f36cdbbd3da95b6eb2b4370b6))
+
+- **core**: Return Plan/Subscription/Payment projections instead of ORM
+  ([#102](https://github.com/mks-zakaria/sehaty-core/pull/102),
+  [`cf4efe3`](https://github.com/mks-zakaria/sehaty-core/commit/cf4efe3dc460b988a956cfda1c9f9f8b1123d0c8))
+
+- **core**: Return ReferralRow projection instead of Referral ORM
+  ([#105](https://github.com/mks-zakaria/sehaty-core/pull/105),
+  [`7a155bf`](https://github.com/mks-zakaria/sehaty-core/commit/7a155bf6becd3a42c3850f70bdeab264e7121460))
+
+- **core**: Return ReviewRow projection instead of Review ORM
+  ([#101](https://github.com/mks-zakaria/sehaty-core/pull/101),
+  [`4b0bf4d`](https://github.com/mks-zakaria/sehaty-core/commit/4b0bf4d3f1aabe14735cc43a70e798939a1472c1))
+
+
 ## v1.34.0 (2026-07-16)
 
 ### Features
