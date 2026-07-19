@@ -155,6 +155,26 @@ def test_full_consultation_flow_with_substitute(db):
     assert AppointmentController.waiting_queue(substitute) == []
 
 
+def test_active_session_for_owner(db):
+    owner = _seed_doctor(db, "owner2@clinic.ma")
+    substitute = _seed_doctor(db, "sub@clinic.ma")
+    cab = CabinetController.create(owner, "C-owner")
+
+    # Nobody online yet.
+    assert CabinetController.active_session_for_owner(owner) is None
+
+    # A substitute opens the shift; the owner's secretary can still discover it.
+    sess = CabinetController.open_session(cab.id, substitute)
+    found = CabinetController.active_session_for_owner(owner)
+    assert found is not None
+    assert found.id == sess.id
+    assert found.acting_doctor_id == substitute  # substitute covering the owner
+
+    # Closing it goes back to "nobody online".
+    CabinetController.close_session(sess.id)
+    assert CabinetController.active_session_for_owner(owner) is None
+
+
 def test_only_one_open_session_per_cabinet(db):
     owner = _seed_doctor(db, "o@clinic.ma")
     cab = CabinetController.create(owner, "C1")

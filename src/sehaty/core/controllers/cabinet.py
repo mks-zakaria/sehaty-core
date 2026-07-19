@@ -122,6 +122,30 @@ class CabinetController:
                 else None
             )
 
+    @staticmethod
+    def active_session_for_owner(owner_doctor_id: int) -> CabinetSessionRow | None:
+        """The open session at any cabinet owned by ``owner_doctor_id``, else ``None``.
+
+        Lets a secretary (who works for the owner) discover the currently-online
+        session — run by the owner OR a substitute — so they can check patients in
+        without needing to know the cabinet id.
+        """
+        with get_session() as session:
+            cabinet_session = session.execute(
+                select(CabinetSession)
+                .join(Cabinet, CabinetSession.cabinet_id == Cabinet.id)
+                .where(
+                    Cabinet.owner_doctor_id == owner_doctor_id,
+                    CabinetSession.is_open.is_(True),
+                )
+                .order_by(CabinetSession.opened_at.desc())
+            ).scalars().first()
+            return (
+                CabinetSessionRow.model_validate(cabinet_session)
+                if cabinet_session is not None
+                else None
+            )
+
 
 def _utcnow(now: datetime | None) -> datetime:
     """Normalise ``now`` to a UTC-aware instant (defaults to the current instant)."""
