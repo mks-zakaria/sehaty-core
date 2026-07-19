@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.38.0 (2026-07-19)
+
+### Features
+
+- **core**: Add Reviews and Billing sheets to the doctor export
+  ([#115](https://github.com/mks-zakaria/sehaty-core/pull/115),
+  [`2b4bc54`](https://github.com/mks-zakaria/sehaty-core/commit/2b4bc5424c13cb1a0bea3cd965862e49bd102a87))
+
+
 ## v1.37.0 (2026-07-19)
 
 ### Features
