@@ -182,13 +182,16 @@ class AppointmentController:
         if start_at.tzinfo is None:
             start_at = start_at.replace(tzinfo=UTC)
         with get_session() as session:
+            # Cap first: a full day suppresses its slots, so checking the cap
+            # before find_slot_end lets the clear "day is full" message win over
+            # the generic "slot not available" one.
+            if daily_cap_reached(session, doctor_id, start_at):
+                raise SehatyConflictError("the doctor is fully booked for that day")
             end_at = find_slot_end(session, doctor_id, start_at)
             if end_at is None:
                 raise SehatyConflictError(
                     "requested slot is not available (already booked or outside availability)"
                 )
-            if daily_cap_reached(session, doctor_id, start_at):
-                raise SehatyConflictError("the doctor is fully booked for that day")
 
             # Auto-link the booking to the doctor's patient register (same session,
             # no nesting). Reuse the doctor's existing register row for this app
@@ -540,14 +543,15 @@ class AppointmentController:
                     session.flush()
                 return AppointmentRow.model_validate(appt)
 
-            new_end_at = find_slot_end(session, doctor_id, new_start_at)
-            if new_end_at is None:
-                raise SehatyConflictError("requested slot is not available")
-            # The daily cap must not count the appointment being moved itself.
+            # Cap first (excluding the appointment being moved), so a full target
+            # day surfaces the clear "day is full" message before find_slot_end.
             if daily_cap_reached(
                 session, doctor_id, new_start_at, exclude_appointment_id=appt.id
             ):
                 raise SehatyConflictError("the doctor is fully booked for that day")
+            new_end_at = find_slot_end(session, doctor_id, new_start_at)
+            if new_end_at is None:
+                raise SehatyConflictError("requested slot is not available")
 
             appt.start_at = new_start_at
             appt.end_at = new_end_at

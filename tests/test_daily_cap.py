@@ -114,10 +114,11 @@ def test_cap_suppresses_day_once_full(db: sessionmaker[Session]) -> None:
         assert available_slots(s, doc, _MONDAY, _MONDAY)
     AppointmentController.book(p2, doc, _at(9, 30))
 
-    # Cap reached: that day's slots vanish and a third booking is rejected.
+    # Cap reached: that day's slots vanish and a third booking is rejected with
+    # the clear "fully booked" message (not the generic slot-unavailable one).
     with db() as s:
         assert available_slots(s, doc, _MONDAY, _MONDAY) == []
-    with pytest.raises(SehatyConflictError):
+    with pytest.raises(SehatyConflictError, match="fully booked"):
         AppointmentController.book(p3, doc, _at(10, 0))
 
 
