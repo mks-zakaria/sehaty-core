@@ -23,7 +23,11 @@ from sqlalchemy.pool import StaticPool
 from sehaty.core import security
 from sehaty.core.controllers.auth import AuthController
 from sehaty.core.db import session as session_mod
-from sehaty.core.errors import SehatyForbiddenError, SehatyValidationError
+from sehaty.core.errors import (
+    SehatyConflictError,
+    SehatyForbiddenError,
+    SehatyValidationError,
+)
 
 
 @compiles(Geography, "sqlite")
@@ -300,3 +304,47 @@ def test_get_active_user(db: sessionmaker[Session]) -> None:
     assert AuthController.get_active_user(user.id).id == user.id
     with pytest.raises(SehatyForbiddenError):
         AuthController.get_active_user(999999)
+
+
+def test_patient_register_and_login(db: sessionmaker[Session]) -> None:
+    bundle = AuthController.register_patient("+212650000001", "secret123")
+    assert bundle["role"] == UserRole.PATIENT
+    assert bundle["access"] and bundle["refresh"]
+
+    # Log in with the same phone + password.
+    login = AuthController.login_patient("+212650000001", "secret123")
+    assert login["role"] == UserRole.PATIENT
+
+    # Wrong password -> forbidden (opaque).
+    with pytest.raises(SehatyForbiddenError):
+        AuthController.login_patient("+212650000001", "nope")
+
+
+def test_patient_register_duplicate_phone_conflicts(db: sessionmaker[Session]) -> None:
+    AuthController.register_patient("+212650000002", "secret123")
+    with pytest.raises(SehatyConflictError):
+        AuthController.register_patient("+212650000002", "another123")
+
+
+def test_patient_register_validates(db: sessionmaker[Session]) -> None:
+    with pytest.raises(SehatyValidationError):
+        AuthController.register_patient("  ", "secret123")
+    with pytest.raises(SehatyValidationError):
+        AuthController.register_patient("+212650000003", "short")
+
+
+def test_register_upgrades_passwordless_phone(db: sessionmaker[Session]) -> None:
+    # Simulate an OTP-created passwordless patient, then register a password.
+    with db() as s:
+        s.add(
+            User(
+                email="phone++212650000004@sehaty.local",
+                phone="+212650000004",
+                role=UserRole.PATIENT,
+                is_active=True,
+            )
+        )
+        s.commit()
+    bundle = AuthController.register_patient("+212650000004", "secret123")
+    assert bundle["role"] == UserRole.PATIENT
+    assert AuthController.login_patient("+212650000004", "secret123")["access"]

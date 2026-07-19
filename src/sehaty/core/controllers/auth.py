@@ -147,6 +147,61 @@ class AuthController:
             return _token_bundle(user, issue_refresh_token(session, user.id, user_agent))
 
     @staticmethod
+    def register_patient(phone: str, password: str, user_agent: str | None = None) -> dict:
+        """Create a PATIENT with a phone + password and log them in.
+
+        Phone verification (OTP) is intentionally skipped for now — the clinic's
+        secretary confirms real attendance, so an unverified booking costs nothing
+        until it's honoured. A phone that already has a password is a conflict; a
+        pre-existing passwordless phone (from the OTP path) is upgraded in place.
+        Returns an access + refresh token bundle (auto-login).
+        """
+        phone = phone.strip()
+        if not phone:
+            raise SehatyValidationError("phone is required")
+        if len(password) < 6:
+            raise SehatyValidationError("password must be at least 6 characters")
+        with get_session() as session:
+            user = session.execute(select(User).where(User.phone == phone)).scalar_one_or_none()
+            if user is not None:
+                if user.password_hash is not None:
+                    raise SehatyConflictError("phone already registered")
+                # Upgrade a passwordless (OTP-created) account.
+                user.password_hash = hash_password(password)
+            else:
+                user = User(
+                    # email is required + unique on User; synthesise a stable one.
+                    email=f"phone+{phone}@sehaty.local",
+                    phone=phone,
+                    password_hash=hash_password(password),
+                    role=UserRole.PATIENT,
+                    is_active=True,
+                )
+                session.add(user)
+            session.flush()
+            return _token_bundle(user, issue_refresh_token(session, user.id, user_agent))
+
+    @staticmethod
+    def login_patient(phone: str, password: str, user_agent: str | None = None) -> dict:
+        """Verify a patient's phone + password and issue tokens.
+
+        Same opaque ``invalid credentials`` error as :meth:`login` so we never
+        leak which phone numbers exist.
+        """
+        phone = phone.strip()
+        with get_session() as session:
+            user = session.execute(select(User).where(User.phone == phone)).scalar_one_or_none()
+            if (
+                user is None
+                or user.password_hash is None
+                or not verify_password(password, user.password_hash)
+            ):
+                raise SehatyForbiddenError("invalid credentials")
+            if not user.is_active:
+                raise SehatyForbiddenError("account is disabled")
+            return _token_bundle(user, issue_refresh_token(session, user.id, user_agent))
+
+    @staticmethod
     def request_patient_otp(phone: str) -> str:
         """Generate a phone OTP and return the code for the SMS layer."""
         if not phone.strip():
