@@ -16,7 +16,12 @@ from sqlalchemy import select
 
 from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
-from sehaty.core.errors import SehatyConflictError, SehatyNotFoundError
+from sehaty.core.errors import (
+    SehatyConflictError,
+    SehatyForbiddenError,
+    SehatyNotFoundError,
+    SehatyValidationError,
+)
 
 
 class CabinetRow(DomainModel):
@@ -25,6 +30,8 @@ class CabinetRow(DomainModel):
     name: str
     address: str | None
     is_active: bool
+    waiting_room_count: int
+    waiting_alert_threshold: int | None
 
 
 class CabinetSessionRow(DomainModel):
@@ -121,6 +128,86 @@ class CabinetController:
                 if cabinet_session is not None
                 else None
             )
+
+    @staticmethod
+    def set_alert_threshold(
+        owner_doctor_id: int, cabinet_id: int, threshold: int | None
+    ) -> CabinetRow:
+        """Set the doctor's waiting-room alert threshold for their cabinet.
+
+        ``threshold`` is a positive count (people waiting) or ``None`` to disable
+        the alert. Only the cabinet owner may set it.
+        """
+        if threshold is not None and threshold < 1:
+            raise SehatyValidationError("threshold must be a positive number or null")
+        with get_session() as session:
+            cabinet = session.get(Cabinet, cabinet_id)
+            if cabinet is None:
+                raise SehatyNotFoundError(f"cabinet {cabinet_id} not found")
+            if cabinet.owner_doctor_id != owner_doctor_id:
+                raise SehatyForbiddenError("not your cabinet")
+            cabinet.waiting_alert_threshold = threshold
+            session.flush()
+            return CabinetRow.model_validate(cabinet)
+
+    @staticmethod
+    def set_waiting_count(actor_doctor_id: int, cabinet_id: int, count: int) -> CabinetRow:
+        """Set how many people are in the waiting room (secretary or the doctor).
+
+        ``actor_doctor_id`` is the resolved owner doctor (a secretary is mapped to
+        the doctor they work for). When the new count reaches the doctor's
+        ``waiting_alert_threshold`` — crossing it from below — and no one is online
+        at the cabinet, the owner is notified to head in. Edge-triggered so a
+        steady stream of updates above the line pings only once.
+        """
+        if count < 0:
+            raise SehatyValidationError("waiting-room count cannot be negative")
+        with get_session() as session:
+            cabinet = session.get(Cabinet, cabinet_id)
+            if cabinet is None:
+                raise SehatyNotFoundError(f"cabinet {cabinet_id} not found")
+            if cabinet.owner_doctor_id != actor_doctor_id:
+                raise SehatyForbiddenError("not your cabinet")
+
+            previous = cabinet.waiting_room_count
+            threshold = cabinet.waiting_alert_threshold
+            cabinet.waiting_room_count = count
+
+            # The doctor is "present" iff a session is open at this cabinet.
+            online = session.execute(
+                select(CabinetSession.id).where(
+                    CabinetSession.cabinet_id == cabinet_id,
+                    CabinetSession.is_open.is_(True),
+                )
+            ).first() is not None
+
+            should_alert = (
+                threshold is not None
+                and count >= threshold
+                and previous < threshold
+                and not online
+            )
+            owner_id = cabinet.owner_doctor_id
+            cabinet_name = cabinet.name
+            session.flush()
+            row = CabinetRow.model_validate(cabinet)
+
+        # Notify AFTER the count commits, in its own session, never fatal (mirrors
+        # AppointmentController.check_in / book).
+        if should_alert:
+            try:
+                from sehaty.core.controllers.notifications import NotificationController
+
+                NotificationController.notify(
+                    owner_id,
+                    kind="waiting_room_alert",
+                    message=f"{count} patients are waiting at {cabinet_name} — head to the cabinet",
+                    entity="cabinet",
+                    entity_id=cabinet_id,
+                )
+            except Exception:
+                pass
+        return row
 
     @staticmethod
     def active_session_for_owner(owner_doctor_id: int) -> CabinetSessionRow | None:
