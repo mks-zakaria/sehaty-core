@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.39.0 (2026-07-19)
+
+### Features
+
+- **core**: Add Prescription Items sheet to the doctor export
+  ([#117](https://github.com/mks-zakaria/sehaty-core/pull/117),
+  [`bef801f`](https://github.com/mks-zakaria/sehaty-core/commit/bef801fcf4758a4170f771cb2d7c2c5efc3b3ae9))
+
+
 ## v1.38.0 (2026-07-19)
 
 ### Features
