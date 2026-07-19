@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.42.0 (2026-07-19)
+
+### Features
+
+- **core**: Specialty darija + directory name search
+  ([#123](https://github.com/mks-zakaria/sehaty-core/pull/123),
+  [`7e95aee`](https://github.com/mks-zakaria/sehaty-core/commit/7e95aeecc47490d6a05f496b807abdb4f6d04441))
+
+
 ## v1.41.0 (2026-07-19)
 
 ### Features
