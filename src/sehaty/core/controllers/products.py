@@ -8,10 +8,10 @@ decrements product stock. All reads return detached ``DomainModel`` projections;
 failures raise the ``SehatyError`` taxonomy.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime, time, timedelta
 
 from sehaty.db import PharmacyProduct, ProductKind, Sale, SaleItem
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
@@ -48,6 +48,21 @@ class SaleRow(DomainModel):
     sold_at: datetime
     total: float
     items: list[SaleItemRow]
+
+
+class TopProduct(DomainModel):
+    name: str
+    quantity: int
+    revenue: float
+
+
+class SalesReport(DomainModel):
+    today_total: float
+    today_count: int
+    period_days: int
+    period_total: float
+    period_count: int
+    top_products: list[TopProduct]
 
 
 def _row(p: PharmacyProduct) -> ProductRow:
@@ -230,6 +245,54 @@ class SaleController:
             sale.total = total
             session.flush()
             return SaleRow(id=sale.id, sold_at=sale.sold_at, total=total, items=recorded)
+
+    @staticmethod
+    def report(pharmacy_id: int, days: int = 7, now: datetime | None = None) -> SalesReport:
+        """Sales totals for the pharmacy: today, the trailing period, and top sellers.
+
+        ``today`` is the current UTC calendar day; the period is the trailing
+        ``days`` days. Top products are ranked by units sold over the period.
+        """
+        if days < 1:
+            days = 7
+        now = (now or datetime.now(UTC)).astimezone(UTC)
+        day_start = datetime.combine(now.date(), time.min, tzinfo=UTC)
+        period_start = now - timedelta(days=days)
+
+        with get_session() as session:
+            today = session.execute(
+                select(func.coalesce(func.sum(Sale.total), 0.0), func.count(Sale.id)).where(
+                    Sale.pharmacy_id == pharmacy_id, Sale.sold_at >= day_start
+                )
+            ).one()
+            period = session.execute(
+                select(func.coalesce(func.sum(Sale.total), 0.0), func.count(Sale.id)).where(
+                    Sale.pharmacy_id == pharmacy_id, Sale.sold_at >= period_start
+                )
+            ).one()
+            top_rows = session.execute(
+                select(
+                    SaleItem.name,
+                    func.coalesce(func.sum(SaleItem.quantity), 0),
+                    func.coalesce(func.sum(SaleItem.line_total), 0.0),
+                )
+                .join(Sale, SaleItem.sale_id == Sale.id)
+                .where(Sale.pharmacy_id == pharmacy_id, Sale.sold_at >= period_start)
+                .group_by(SaleItem.name)
+                .order_by(func.sum(SaleItem.quantity).desc())
+                .limit(5)
+            ).all()
+
+        return SalesReport(
+            today_total=float(today[0]),
+            today_count=int(today[1]),
+            period_days=days,
+            period_total=float(period[0]),
+            period_count=int(period[1]),
+            top_products=[
+                TopProduct(name=r[0], quantity=int(r[1]), revenue=float(r[2])) for r in top_rows
+            ],
+        )
 
     @staticmethod
     def list_sales(pharmacy_id: int, limit: int = 50) -> list[SaleRow]:

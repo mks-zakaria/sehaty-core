@@ -107,3 +107,37 @@ def test_lookup_unknown_barcode_raises(db):
 def test_register_bad_kind_raises(db):
     with pytest.raises(SehatyValidationError):
         ProductController.register(1, "A", "Thing", "FOOD")
+
+
+def test_sales_report(db):
+    ProductController.register(1, "6111", "Doliprane 1000", "MEDICINE", price=20.0, quantity=50)
+    ProductController.register(1, "6222", "Nivea Cream", "COSMETIC", price=35.0, quantity=50)
+
+    # Two sales "today" (default now), spread across products.
+    SaleController.sell(1, [{"barcode": "6111", "quantity": 3}], now=_NOW)  # 60
+    SaleController.sell(
+        1, [{"barcode": "6111", "quantity": 1}, {"barcode": "6222", "quantity": 2}], now=_NOW
+    )  # 20 + 70 = 90
+
+    rep = SaleController.report(1, days=7, now=_NOW)
+    assert rep.today_count == 2
+    assert rep.today_total == pytest.approx(150.0)
+    assert rep.period_count == 2
+    assert rep.period_total == pytest.approx(150.0)
+    # Doliprane sold 4 units, Nivea 2 -> Doliprane ranks first.
+    assert rep.top_products[0].name == "Doliprane 1000"
+    assert rep.top_products[0].quantity == 4
+    assert rep.top_products[0].revenue == pytest.approx(80.0)
+
+
+def test_sales_report_excludes_older_than_period(db):
+    from datetime import timedelta
+
+    ProductController.register(1, "6111", "Doliprane 1000", "MEDICINE", price=20.0, quantity=50)
+    old = _NOW - timedelta(days=30)
+    SaleController.sell(1, [{"barcode": "6111", "quantity": 1}], now=old)  # outside 7d window
+
+    rep = SaleController.report(1, days=7, now=_NOW)
+    assert rep.period_count == 0
+    assert rep.today_count == 0
+    assert rep.top_products == []
