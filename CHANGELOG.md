@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.44.0 (2026-07-19)
+
+### Features
+
+- **core**: Pharmacy POS controllers — products + sales
+  ([#127](https://github.com/mks-zakaria/sehaty-core/pull/127),
+  [`6f1dcd5`](https://github.com/mks-zakaria/sehaty-core/commit/6f1dcd51ab556b2e83cefccec80575fb68a6a6af))
+
+
 ## v1.43.0 (2026-07-19)
 
 ### Features
