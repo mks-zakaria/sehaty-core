@@ -11,8 +11,23 @@ from datetime import time
 from sehaty.db import Availability
 from sqlalchemy import select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
+
+
+class AvailabilityRow(DomainModel):
+    """One recurring weekly availability window (detached projection).
+
+    The plain, id-based view returned by :meth:`AvailabilityController.add` /
+    :meth:`list` — the transport layer serialises it directly.
+    """
+
+    id: int
+    weekday: int
+    start_time: time
+    end_time: time
+    slot_minutes: int
 
 
 class AvailabilityController:
@@ -23,7 +38,7 @@ class AvailabilityController:
         start_time: time,
         end_time: time,
         slot_minutes: int = 30,
-    ) -> Availability:
+    ) -> AvailabilityRow:
         """Create a recurring weekly availability window for a doctor.
 
         Validates ``weekday`` in 0..6 (Mon..Sun) and ``start_time < end_time``;
@@ -45,10 +60,10 @@ class AvailabilityController:
             )
             session.add(avail)
             session.flush()
-            return avail
+            return AvailabilityRow.model_validate(avail)
 
     @staticmethod
-    def list(doctor_id: int) -> list[Availability]:
+    def list(doctor_id: int) -> list[AvailabilityRow]:
         """Return a doctor's availability windows, ordered by weekday then time."""
         stmt = (
             select(Availability)
@@ -56,7 +71,10 @@ class AvailabilityController:
             .order_by(Availability.weekday, Availability.start_time)
         )
         with get_session() as session:
-            return list(session.execute(stmt).scalars().all())
+            return [
+                AvailabilityRow.model_validate(a)
+                for a in session.execute(stmt).scalars().all()
+            ]
 
     @staticmethod
     def delete(doctor_id: int, availability_id: int) -> None:
