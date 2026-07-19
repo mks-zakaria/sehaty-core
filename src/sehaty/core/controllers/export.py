@@ -13,7 +13,15 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
-from sehaty.db import Appointment, ClinicPatient, Diagnosis, Prescription
+from sehaty.db import (
+    Appointment,
+    ClinicPatient,
+    Diagnosis,
+    Invoice,
+    Prescription,
+    Review,
+    ReviewDirection,
+)
 from sqlalchemy import select
 
 from sehaty.core.db.session import get_session
@@ -49,8 +57,9 @@ class ExportController:
 
         Sheets: Patients (the register), Appointments, Consultations (appointments
         the doctor actually started/finished, with the recorded encounter),
-        Diagnoses, and Prescriptions. All are scoped to ``doctor_id`` and ordered
-        newest-first.
+        Diagnoses, Prescriptions, Reviews (patient reviews about the doctor), and
+        Billing (the doctor's invoices). All are scoped to ``doctor_id`` and
+        ordered newest-first.
         """
         with get_session() as session:
             patients = ExportController._patients(session, doctor_id)
@@ -59,7 +68,11 @@ class ExportController:
             consultations = ExportController._consultations(session, doctor_id, names)
             diagnoses = ExportController._diagnoses(session, doctor_id, names)
             prescriptions = ExportController._prescriptions(session, doctor_id, names)
-        return [patients, appointments, consultations, diagnoses, prescriptions]
+            reviews = ExportController._reviews(session, doctor_id)
+            billing = ExportController._billing(session, doctor_id)
+        return [
+            patients, appointments, consultations, diagnoses, prescriptions, reviews, billing,
+        ]
 
     @staticmethod
     def _name_map(session, doctor_id: int) -> dict[int, str]:
@@ -192,3 +205,42 @@ class ExportController:
             for r in rows
         ]
         return ExportSheet("Prescriptions", cols, out)
+
+    @staticmethod
+    def _reviews(session, doctor_id: int) -> ExportSheet:
+        cols = ["id", "stars", "comment", "status", "reply", "reply_at", "created_at"]
+        rows = session.execute(
+            select(
+                Review.id,
+                Review.stars,
+                Review.comment,
+                Review.status,
+                Review.reply,
+                Review.reply_at,
+                Review.created_at,
+            )
+            .where(
+                Review.target_id == doctor_id,
+                Review.direction == ReviewDirection.PATIENT_ON_DOCTOR,
+            )
+            .order_by(Review.created_at.desc())
+        ).all()
+        return ExportSheet("Reviews", cols, [[_cell(v) for v in r] for r in rows])
+
+    @staticmethod
+    def _billing(session, doctor_id: int) -> ExportSheet:
+        cols = ["invoice_id", "amount", "currency", "status", "issued_at", "due_at", "paid_at"]
+        rows = session.execute(
+            select(
+                Invoice.id,
+                Invoice.amount,
+                Invoice.currency,
+                Invoice.status,
+                Invoice.issued_at,
+                Invoice.due_at,
+                Invoice.paid_at,
+            )
+            .where(Invoice.doctor_id == doctor_id)
+            .order_by(Invoice.issued_at.desc())
+        ).all()
+        return ExportSheet("Billing", cols, [[_cell(v) for v in r] for r in rows])
