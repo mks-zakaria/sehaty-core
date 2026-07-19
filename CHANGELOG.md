@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.46.0 (2026-07-19)
+
+### Features
+
+- **core**: Waiting-room count + threshold alert
+  ([#133](https://github.com/mks-zakaria/sehaty-core/pull/133),
+  [`f524504`](https://github.com/mks-zakaria/sehaty-core/commit/f524504d78c4ee3478cfb4784b0f81054596d709))
+
+
 ## v1.45.1 (2026-07-19)
 
 ### Bug Fixes
