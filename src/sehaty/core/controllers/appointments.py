@@ -9,6 +9,7 @@ raise the ``SehatyError`` taxonomy; methods never return ``None`` for an error.
 
 from datetime import UTC, datetime, timedelta
 
+from pydantic import Field
 from sehaty.db import (
     Appointment,
     AppointmentStatus,
@@ -18,7 +19,6 @@ from sehaty.db import (
     User,
     UserRole,
 )
-from pydantic import Field
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
