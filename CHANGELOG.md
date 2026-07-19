@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.37.0 (2026-07-19)
+
+### Features
+
+- **core**: Doctor data export controller
+  ([#113](https://github.com/mks-zakaria/sehaty-core/pull/113),
+  [`64eeea7`](https://github.com/mks-zakaria/sehaty-core/commit/64eeea7465205a6e2a1b927143dd8c025266eda1))
+
+
 ## v1.36.0 (2026-07-19)
 
 ### Features
