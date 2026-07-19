@@ -29,7 +29,23 @@ from sqlalchemy.pool import StaticPool
 from sehaty.core.controllers.appointments import AppointmentController
 from sehaty.core.controllers.cabinet import CabinetController
 from sehaty.core.db import session as session_mod
-from sehaty.core.errors import SehatyConflictError, SehatyForbiddenError
+from sehaty.core.errors import (
+    SehatyConflictError,
+    SehatyForbiddenError,
+    SehatyValidationError,
+)
+
+
+def _waiting_alerts(factory, doctor_id: int) -> int:
+    with factory() as s:
+        return len(
+            s.execute(
+                select(Notification.id).where(
+                    Notification.user_id == doctor_id,
+                    Notification.kind == "waiting_room_alert",
+                )
+            ).all()
+        )
 
 _TABLES = [
     User.__table__,
@@ -201,3 +217,77 @@ def test_check_in_rejects_closed_session(db):
     CabinetController.close_session(sess.id)
     with pytest.raises(SehatyConflictError):
         AppointmentController.check_in(appt, sess.id)
+
+
+# --------------------------------------------------------------------------- #
+# Waiting-room count + doctor alert threshold
+# --------------------------------------------------------------------------- #
+
+
+def test_waiting_alert_fires_when_offline_and_crossing(db):
+    doc = _seed_doctor(db, "wr1@clinic.ma")
+    cab = CabinetController.create(doc, "Cabinet A")
+    CabinetController.set_alert_threshold(doc, cab.id, 3)
+
+    # Below the threshold: no alert.
+    row = CabinetController.set_waiting_count(doc, cab.id, 2)
+    assert row.waiting_room_count == 2
+    assert _waiting_alerts(db, doc) == 0
+
+    # Crossing the threshold while offline: one alert.
+    row = CabinetController.set_waiting_count(doc, cab.id, 3)
+    assert row.waiting_room_count == 3
+    assert _waiting_alerts(db, doc) == 1
+
+
+def test_waiting_alert_is_edge_triggered(db):
+    doc = _seed_doctor(db, "wr2@clinic.ma")
+    cab = CabinetController.create(doc, "Cabinet B")
+    CabinetController.set_alert_threshold(doc, cab.id, 3)
+
+    CabinetController.set_waiting_count(doc, cab.id, 3)  # crosses -> 1 alert
+    CabinetController.set_waiting_count(doc, cab.id, 5)  # already above -> no new alert
+    CabinetController.set_waiting_count(doc, cab.id, 4)  # still above -> no new alert
+    assert _waiting_alerts(db, doc) == 1
+
+
+def test_no_alert_when_doctor_online(db):
+    doc = _seed_doctor(db, "wr3@clinic.ma")
+    cab = CabinetController.create(doc, "Cabinet C")
+    CabinetController.set_alert_threshold(doc, cab.id, 2)
+    CabinetController.open_session(cab.id, doc)  # doctor is online
+
+    CabinetController.set_waiting_count(doc, cab.id, 9)
+    assert _waiting_alerts(db, doc) == 0
+
+
+def test_no_alert_without_threshold(db):
+    doc = _seed_doctor(db, "wr4@clinic.ma")
+    cab = CabinetController.create(doc, "Cabinet D")
+    CabinetController.set_waiting_count(doc, cab.id, 50)
+    assert _waiting_alerts(db, doc) == 0
+
+
+def test_waiting_count_ownership_and_validation(db):
+    doc = _seed_doctor(db, "wr5@clinic.ma")
+    other = _seed_doctor(db, "wr6@clinic.ma")
+    cab = CabinetController.create(doc, "Cabinet E")
+
+    with pytest.raises(SehatyForbiddenError):
+        CabinetController.set_waiting_count(other, cab.id, 1)
+    with pytest.raises(SehatyForbiddenError):
+        CabinetController.set_alert_threshold(other, cab.id, 3)
+    with pytest.raises(SehatyValidationError):
+        CabinetController.set_waiting_count(doc, cab.id, -1)
+    with pytest.raises(SehatyValidationError):
+        CabinetController.set_alert_threshold(doc, cab.id, 0)
+
+
+def test_clearing_threshold_disables_alert(db):
+    doc = _seed_doctor(db, "wr7@clinic.ma")
+    cab = CabinetController.create(doc, "Cabinet F")
+    CabinetController.set_alert_threshold(doc, cab.id, 3)
+    row = CabinetController.set_alert_threshold(doc, cab.id, None)
+    assert row.waiting_alert_threshold is None
+    CabinetController.set_waiting_count(doc, cab.id, 10)
+    assert _waiting_alerts(db, doc) == 0
