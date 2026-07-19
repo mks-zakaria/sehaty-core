@@ -31,7 +31,7 @@ from sehaty.core.errors import (
     SehatyForbiddenError,
     SehatyNotFoundError,
 )
-from sehaty.core.services.slots import _as_utc, find_slot_end
+from sehaty.core.services.slots import _as_utc, daily_cap_reached, find_slot_end
 
 
 class AppointmentGridRow(DomainModel):
@@ -187,6 +187,8 @@ class AppointmentController:
                 raise SehatyConflictError(
                     "requested slot is not available (already booked or outside availability)"
                 )
+            if daily_cap_reached(session, doctor_id, start_at):
+                raise SehatyConflictError("the doctor is fully booked for that day")
 
             # Auto-link the booking to the doctor's patient register (same session,
             # no nesting). Reuse the doctor's existing register row for this app
@@ -541,6 +543,11 @@ class AppointmentController:
             new_end_at = find_slot_end(session, doctor_id, new_start_at)
             if new_end_at is None:
                 raise SehatyConflictError("requested slot is not available")
+            # The daily cap must not count the appointment being moved itself.
+            if daily_cap_reached(
+                session, doctor_id, new_start_at, exclude_appointment_id=appt.id
+            ):
+                raise SehatyConflictError("the doctor is fully booked for that day")
 
             appt.start_at = new_start_at
             appt.end_at = new_end_at

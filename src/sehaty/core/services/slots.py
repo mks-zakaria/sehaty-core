@@ -27,7 +27,7 @@ from sehaty.db import (
     AvailabilityExceptionKind,
     DoctorProfile,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 MAX_RANGE_DAYS = 31
@@ -99,6 +99,16 @@ def _exceptions_by_date(
     return by_date
 
 
+def _cap_for(day_excs: list[AvailabilityException]) -> int | None:
+    """The most restrictive CAP for a date (min of any CAP exceptions), or None."""
+    caps = [
+        e.max_patients
+        for e in day_excs
+        if e.kind == AvailabilityExceptionKind.CAP and e.max_patients is not None
+    ]
+    return min(caps) if caps else None
+
+
 def _overlaps_blocked(
     day: date,
     tz: ZoneInfo,
@@ -151,6 +161,12 @@ def available_slots(
     range_end = datetime.combine(to_date + timedelta(days=2), time.min, tzinfo=UTC)
     booked = _booked_starts(session, doctor_id, range_start, range_end)
 
+    # Active bookings per *local* date, for the daily-cap gate below.
+    booked_by_local_date: dict[date, int] = {}
+    for s in booked:
+        local_day = s.astimezone(tz).date()
+        booked_by_local_date[local_day] = booked_by_local_date.get(local_day, 0) + 1
+
     slots: list[tuple[datetime, datetime]] = []
     day = from_date
     while day <= to_date:
@@ -163,6 +179,12 @@ def available_slots(
             and e.end_time is None
             for e in day_excs
         ):
+            day += timedelta(days=1)
+            continue
+
+        # Daily cap: once the date's active bookings reach the cap, it's full.
+        cap = _cap_for(day_excs)
+        if cap is not None and booked_by_local_date.get(day, 0) >= cap:
             day += timedelta(days=1)
             continue
 
@@ -222,3 +244,53 @@ def find_slot_end(session: Session, doctor_id: int, start_at: datetime) -> datet
         if start == start_at:
             return end
     return None
+
+
+def daily_cap_reached(
+    session: Session,
+    doctor_id: int,
+    start_at: datetime,
+    exclude_appointment_id: int | None = None,
+) -> bool:
+    """True if a booking at ``start_at`` would exceed the date's daily cap.
+
+    Resolves ``start_at`` to the doctor's local date, reads any CAP exception for
+    that date, and counts active (REQUESTED/CONFIRMED) appointments on it. This is
+    the authoritative guard used by ``book``/``reschedule`` (slot generation
+    already hides slots once a capped day is full, but this closes the race).
+    """
+    start_at = _as_utc(start_at)
+    tz = _doctor_timezone(session, doctor_id)
+    local_day = start_at.astimezone(tz).date()
+
+    cap = session.execute(
+        select(AvailabilityException.max_patients)
+        .where(
+            AvailabilityException.doctor_id == doctor_id,
+            AvailabilityException.date == local_day,
+            AvailabilityException.kind == AvailabilityExceptionKind.CAP,
+            AvailabilityException.max_patients.is_not(None),
+        )
+        .order_by(AvailabilityException.max_patients)
+        .limit(1)
+    ).scalar_one_or_none()
+    if cap is None:
+        return False
+
+    day_start_utc = datetime.combine(local_day, time.min, tzinfo=tz).astimezone(UTC)
+    next_day = local_day + timedelta(days=1)
+    day_end_utc = datetime.combine(next_day, time.min, tzinfo=tz).astimezone(UTC)
+    stmt = (
+        select(func.count())
+        .select_from(Appointment)
+        .where(
+            Appointment.doctor_id == doctor_id,
+            Appointment.status.in_(ACTIVE_STATUSES),
+            Appointment.start_at >= day_start_utc,
+            Appointment.start_at < day_end_utc,
+        )
+    )
+    if exclude_appointment_id is not None:
+        stmt = stmt.where(Appointment.id != exclude_appointment_id)
+    count = session.execute(stmt).scalar_one()
+    return count >= cap
