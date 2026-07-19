@@ -25,31 +25,35 @@ class SpecialtyView(DomainModel):
     name_en: str
     name_fr: str
     name_ar: str
+    # Moroccan darija label; None falls back to name_ar in the UI.
+    name_ary: str | None = None
 
 
-# (slug, name_en, name_fr, name_ar) — the built-in catalogue seeded by
+# (slug, name_en, name_fr, name_ar, name_ary) — the built-in catalogue seeded by
 # ``seed_defaults``. Kept as a module constant so tests can assert its size.
-_DEFAULT_SPECIALTIES: tuple[tuple[str, str, str, str], ...] = (
-    ("generalist", "General practitioner", "Médecin généraliste", "طبيب عام"),
-    ("cardiology", "Cardiologist", "Cardiologue", "طبيب قلب"),
-    ("gastroenterology", "Gastroenterologist", "Gastro-entérologue", "طبيب جهاز هضمي"),
-    ("dermatology", "Dermatologist", "Dermatologue", "طبيب جلدية"),
-    ("pediatrics", "Pediatrician", "Pédiatre", "طبيب أطفال"),
-    ("dentistry", "Dentist", "Dentiste", "طبيب أسنان"),
-    ("gynecology", "Gynecologist", "Gynécologue", "طبيب نساء وتوليد"),
-    ("ophthalmology", "Ophthalmologist", "Ophtalmologue", "طبيب عيون"),
-    ("optician", "Optician", "Opticien", "نظاراتي"),
-    ("otolaryngology", "ENT", "Oto-rhino-laryngologiste", "طبيب أنف وأذن وحنجرة"),
-    ("psychiatry", "Psychiatrist", "Psychiatre", "طبيب نفسي"),
-    ("orthopedics", "Orthopedist", "Orthopédiste", "طبيب عظام"),
-    ("neurology", "Neurologist", "Neurologue", "طبيب أعصاب"),
-    ("urology", "Urologist", "Urologue", "طبيب مسالك بولية"),
-    ("endocrinology", "Endocrinologist", "Endocrinologue", "طبيب غدد صماء"),
-    ("pulmonology", "Pulmonologist", "Pneumologue", "طبيب رئة"),
-    ("rheumatology", "Rheumatologist", "Rhumatologue", "طبيب روماتيزم"),
-    ("general_surgery", "General surgeon", "Chirurgien généraliste", "جراح عام"),
-    ("radiology", "Radiologist", "Radiologue", "طبيب أشعة"),
-    ("nephrology", "Nephrologist", "Néphrologue", "طبيب كلى"),
+_DEFAULT_SPECIALTIES: tuple[tuple[str, str, str, str, str], ...] = (
+    ("generalist", "General practitioner", "Médecin généraliste", "طبيب عام", "طبيب ديال العام"),
+    ("cardiology", "Cardiologist", "Cardiologue", "طبيب قلب", "طبيب ديال القلب"),
+    ("gastroenterology", "Gastroenterologist", "Gastro-entérologue", "طبيب جهاز هضمي",
+     "طبيب ديال المعدة"),
+    ("dermatology", "Dermatologist", "Dermatologue", "طبيب جلدية", "طبيب ديال الجلد"),
+    ("pediatrics", "Pediatrician", "Pédiatre", "طبيب أطفال", "طبيب ديال الدراري"),
+    ("dentistry", "Dentist", "Dentiste", "طبيب أسنان", "طبيب ديال السنان"),
+    ("gynecology", "Gynecologist", "Gynécologue", "طبيب نساء وتوليد", "طبيب ديال العيالات"),
+    ("ophthalmology", "Ophthalmologist", "Ophtalmologue", "طبيب عيون", "طبيب ديال العينين"),
+    ("optician", "Optician", "Opticien", "نظاراتي", "مول النّضاضر"),
+    ("otolaryngology", "ENT", "Oto-rhino-laryngologiste", "طبيب أنف وأذن وحنجرة",
+     "طبيب ديال الأذن والنيف والحلق"),
+    ("psychiatry", "Psychiatrist", "Psychiatre", "طبيب نفسي", "طبيب ديال العقل"),
+    ("orthopedics", "Orthopedist", "Orthopédiste", "طبيب عظام", "طبيب ديال العظام"),
+    ("neurology", "Neurologist", "Neurologue", "طبيب أعصاب", "طبيب ديال الأعصاب"),
+    ("urology", "Urologist", "Urologue", "طبيب مسالك بولية", "طبيب ديال المسالك"),
+    ("endocrinology", "Endocrinologist", "Endocrinologue", "طبيب غدد صماء", "طبيب ديال الغدد"),
+    ("pulmonology", "Pulmonologist", "Pneumologue", "طبيب رئة", "طبيب ديال الرئة"),
+    ("rheumatology", "Rheumatologist", "Rhumatologue", "طبيب روماتيزم", "طبيب ديال المفاصل"),
+    ("general_surgery", "General surgeon", "Chirurgien généraliste", "جراح عام", "جرّاح ديال العام"),
+    ("radiology", "Radiologist", "Radiologue", "طبيب أشعة", "طبيب ديال الراديو"),
+    ("nephrology", "Nephrologist", "Néphrologue", "طبيب كلى", "طبيب ديال الكلاوي"),
 )
 
 
@@ -67,6 +71,7 @@ class SpecialtyController:
                 name_en=row.name_en,
                 name_fr=row.name_fr,
                 name_ar=row.name_ar,
+                name_ary=row.name_ary,
             )
             for row in rows
         ]
@@ -82,7 +87,7 @@ class SpecialtyController:
         with get_session() as session:
             existing = set(session.execute(select(Specialty.slug)).scalars().all())
             inserted = 0
-            for slug, name_en, name_fr, name_ar in _DEFAULT_SPECIALTIES:
+            for slug, name_en, name_fr, name_ar, name_ary in _DEFAULT_SPECIALTIES:
                 if slug in existing:
                     continue
                 session.add(
@@ -91,6 +96,7 @@ class SpecialtyController:
                         name_en=name_en,
                         name_fr=name_fr,
                         name_ar=name_ar,
+                        name_ary=name_ary,
                     )
                 )
                 inserted += 1

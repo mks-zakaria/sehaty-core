@@ -58,6 +58,7 @@ class DoctorDirectoryController:
     @staticmethod
     def list_directory(
         specialty: str | None = None,
+        query: str | None = None,
         sort: str = "rating",
         limit: int = _DEFAULT_LIMIT,
         offset: int = 0,
@@ -131,6 +132,13 @@ class DoctorDirectoryController:
                 .join(Specialty, Specialty.id == DoctorSpecialty.specialty_id)
                 .where(Specialty.slug == specialty_slug)
             )
+
+        # Narrow to a doctor name (the "type then name" search) — case-insensitive.
+        name_q = query.strip() if query and query.strip() else None
+        if name_q:
+            like = f"%{name_q}%"
+            stmt = stmt.where(DoctorProfile.full_name.ilike(like))
+            count_stmt = count_stmt.where(DoctorProfile.full_name.ilike(like))
 
         if sort == "rating":
             # Coalesced score desc puts review-less (0) doctors last without a
