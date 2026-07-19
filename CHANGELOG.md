@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.43.0 (2026-07-19)
+
+### Features
+
+- **core**: Medication catalogue search
+  ([#125](https://github.com/mks-zakaria/sehaty-core/pull/125),
+  [`db24112`](https://github.com/mks-zakaria/sehaty-core/commit/db2411218f140cd5114c253c775cb5b396729d09))
+
+
 ## v1.42.0 (2026-07-19)
 
 ### Features
