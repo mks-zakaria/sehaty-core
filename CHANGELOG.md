@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.40.0 (2026-07-19)
+
+### Features
+
+- **core**: Pharmacy dispensing controller
+  ([#119](https://github.com/mks-zakaria/sehaty-core/pull/119),
+  [`7e4db61`](https://github.com/mks-zakaria/sehaty-core/commit/7e4db6122ce20055e98792264f50bd4a8a5c17e7))
+
+
 ## v1.39.0 (2026-07-19)
 
 ### Features
