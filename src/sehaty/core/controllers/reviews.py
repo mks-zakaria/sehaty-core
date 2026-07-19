@@ -11,6 +11,8 @@ entry. Failures raise the ``SehatyError`` taxonomy; methods never return ``None`
 to signal an error.
 """
 
+from datetime import datetime
+
 from sehaty.db import (
     Appointment,
     AppointmentStatus,
@@ -25,6 +27,7 @@ from sehaty.db import (
 from sehaty.db.base import utcnow
 from sqlalchemy import func, select
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import (
     SehatyConflictError,
@@ -36,6 +39,28 @@ from sehaty.core.errors import (
 _MODERATION_ACTIONS = {"PUBLISH", "REMOVE"}
 
 
+class ReviewRow(DomainModel):
+    """A single review as seen on the wire (detached projection).
+
+    The id-based view returned by :meth:`ReviewController.create` / :meth:`reply`
+    / :meth:`flag` / :meth:`moderate` / :meth:`list_published_for` /
+    :meth:`list_moderation_queue` — the transport layer serialises it directly,
+    replacing the former ``sehaty-api`` ``ReviewOut`` mirror.
+    """
+
+    id: int
+    author_id: int
+    target_id: int
+    appointment_id: int
+    direction: ReviewDirection
+    stars: int
+    comment: str | None
+    status: ReviewStatus
+    reply: str | None
+    reply_at: datetime | None
+    created_at: datetime
+
+
 class ReviewController:
     @staticmethod
     def create(
@@ -44,7 +69,7 @@ class ReviewController:
         direction: ReviewDirection,
         stars: int,
         comment: str | None = None,
-    ) -> Review:
+    ) -> ReviewRow:
         """Create a ``PENDING`` review behind the booking gate.
 
         The appointment must exist, be ``COMPLETED``, and the author must be the
@@ -125,10 +150,10 @@ class ReviewController:
             )
         except Exception:
             pass
-        return review
+        return ReviewRow.model_validate(review)
 
     @staticmethod
-    def reply(user_id: int, review_id: int, text: str) -> Review:
+    def reply(user_id: int, review_id: int, text: str) -> ReviewRow:
         """Let the rated party post their one right-of-reply.
 
         Only the review's ``target`` may reply and only once; anyone else is
@@ -172,10 +197,10 @@ class ReviewController:
             )
         except Exception:
             pass
-        return review
+        return ReviewRow.model_validate(review)
 
     @staticmethod
-    def flag(user_id: int, review_id: int) -> Review:
+    def flag(user_id: int, review_id: int) -> ReviewRow:
         """Flag a review for moderation (any authenticated user).
 
         Moves the review to ``FLAGGED`` so it surfaces in the moderation queue
@@ -195,10 +220,10 @@ class ReviewController:
                 )
             )
             session.flush()
-            return review
+            return ReviewRow.model_validate(review)
 
     @staticmethod
-    def moderate(admin_id: int, review_id: int, action: str) -> Review:
+    def moderate(admin_id: int, review_id: int, action: str) -> ReviewRow:
         """Publish or remove a review (ADMIN only), recomputing reputation.
 
         ``action`` must be ``"PUBLISH"`` or ``"REMOVE"`` (else
@@ -253,10 +278,10 @@ class ReviewController:
                 )
             except Exception:
                 pass
-        return review
+        return ReviewRow.model_validate(review)
 
     @staticmethod
-    def list_published_for(target_id: int) -> list[Review]:
+    def list_published_for(target_id: int) -> list[ReviewRow]:
         """Return a user's ``PUBLISHED`` reviews (public), newest first."""
         stmt = (
             select(Review)
@@ -267,10 +292,10 @@ class ReviewController:
             .order_by(Review.created_at.desc(), Review.id.desc())
         )
         with get_session() as session:
-            return list(session.execute(stmt).scalars().all())
+            return [ReviewRow.model_validate(r) for r in session.execute(stmt).scalars().all()]
 
     @staticmethod
-    def list_moderation_queue() -> list[Review]:
+    def list_moderation_queue() -> list[ReviewRow]:
         """Return every ``PENDING`` or ``FLAGGED`` review (admin), newest first."""
         stmt = (
             select(Review)
@@ -278,7 +303,7 @@ class ReviewController:
             .order_by(Review.created_at.desc(), Review.id.desc())
         )
         with get_session() as session:
-            return list(session.execute(stmt).scalars().all())
+            return [ReviewRow.model_validate(r) for r in session.execute(stmt).scalars().all()]
 
     @staticmethod
     def _recompute_reputation(session, target_id: int) -> None:

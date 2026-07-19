@@ -15,11 +15,36 @@ separate title/body in the schema), a short ``kind`` tag, and an optional
 ``entity`` / ``entity_id`` pointer back to whatever triggered it.
 """
 
+from datetime import datetime
+
+from pydantic import Field
 from sehaty.db import Notification
 from sqlalchemy import func, select, update
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyForbiddenError, SehatyNotFoundError, SehatyValidationError
+
+
+class NotificationRow(DomainModel):
+    """A single in-app notification as seen on the bell feed (detached projection).
+
+    The plain view returned by :meth:`NotificationController.notify` /
+    :meth:`list_for` / :meth:`mark_read` — the transport layer serialises it
+    directly.
+    """
+
+    id: int
+    kind: str
+    message: str
+    entity: str | None
+    entity_id: int | None
+    is_read: bool
+    created_at: datetime
+    # Carried for callers (``notify`` returns a row whose recipient some callers
+    # and tests read back) but never serialised — the wire contract never
+    # exposed the recipient's user id.
+    user_id: int | None = Field(default=None, exclude=True)
 
 
 class NotificationController:
@@ -30,7 +55,7 @@ class NotificationController:
         message: str,
         entity: str | None = None,
         entity_id: int | None = None,
-    ) -> Notification:
+    ) -> NotificationRow:
         """Create an unread notification in ``user_id``'s feed and return it.
 
         This is the internal API other controllers call after a domain event
@@ -55,14 +80,14 @@ class NotificationController:
             )
             session.add(notification)
             session.flush()
-            return notification
+            return NotificationRow.model_validate(notification)
 
     @staticmethod
     def list_for(
         user_id: int,
         unread_only: bool = False,
         limit: int = 50,
-    ) -> list[Notification]:
+    ) -> list[NotificationRow]:
         """Return a user's notifications, newest first (bell feed).
 
         When ``unread_only`` is set, only unread rows are returned. ``limit``
@@ -77,7 +102,9 @@ class NotificationController:
         stmt = stmt.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit)
 
         with get_session() as session:
-            return list(session.execute(stmt).scalars().all())
+            return [
+                NotificationRow.model_validate(n) for n in session.execute(stmt).scalars().all()
+            ]
 
     @staticmethod
     def unread_count(user_id: int) -> int:
@@ -90,7 +117,7 @@ class NotificationController:
             return int(session.execute(stmt).scalar_one())
 
     @staticmethod
-    def mark_read(user_id: int, notification_id: int) -> Notification:
+    def mark_read(user_id: int, notification_id: int) -> NotificationRow:
         """Mark one of the user's own notifications read (idempotent).
 
         A missing id is ``SehatyNotFoundError``; a notification owned by another
@@ -107,7 +134,7 @@ class NotificationController:
             if not notification.is_read:
                 notification.is_read = True
                 session.flush()
-            return notification
+            return NotificationRow.model_validate(notification)
 
     @staticmethod
     def mark_all_read(user_id: int) -> int:
