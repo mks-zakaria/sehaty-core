@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.47.0 (2026-07-19)
+
+### Features
+
+- **core**: Pharmacy sales report ([#135](https://github.com/mks-zakaria/sehaty-core/pull/135),
+  [`8d7ffa1`](https://github.com/mks-zakaria/sehaty-core/commit/8d7ffa1d3453f9a91b93080297a72dfb2e60c59f))
+
+
 ## v1.46.0 (2026-07-19)
 
 ### Features
