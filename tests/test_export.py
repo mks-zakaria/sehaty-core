@@ -15,7 +15,9 @@ from sehaty.db import (
     Diagnosis,
     Invoice,
     InvoiceStatus,
+    Medication,
     Prescription,
+    PrescriptionItem,
     PrescriptionStatus,
     Review,
     ReviewDirection,
@@ -39,6 +41,8 @@ _TABLES = [
     Appointment.__table__,
     Diagnosis.__table__,
     Prescription.__table__,
+    PrescriptionItem.__table__,
+    Medication.__table__,
     Review.__table__,
     Invoice.__table__,
 ]
@@ -66,6 +70,11 @@ def _seed(factory) -> int:
         other_cp = ClinicPatient(doctor_id=other.id, full_name="Not Mine")
         s.add_all([cp, other_cp])
         s.flush()
+        rx = Prescription(
+            doctor_id=doctor.id, clinic_patient_id=cp.id, code="RX-1", qr_token="tok-1",
+            status=PrescriptionStatus.ISSUED, issued_at=_NOW,
+            expires_at=_NOW + timedelta(days=30),
+        )
         appt_done = Appointment(
             patient_id=doctor.id, doctor_id=doctor.id, clinic_patient_id=cp.id,
             start_at=_NOW - timedelta(days=1), end_at=_NOW - timedelta(days=1),
@@ -94,11 +103,7 @@ def _seed(factory) -> int:
                 doctor_id=doctor.id, clinic_patient_id=cp.id, label="Flu",
                 diagnosed_at=_NOW,
             ),
-            Prescription(
-                doctor_id=doctor.id, clinic_patient_id=cp.id, code="RX-1", qr_token="tok-1",
-                status=PrescriptionStatus.ISSUED, issued_at=_NOW,
-                expires_at=_NOW + timedelta(days=30),
-            ),
+            rx,
             Review(
                 author_id=other.id, target_id=doctor.id, appointment_id=appt_done.id,
                 direction=ReviewDirection.PATIENT_ON_DOCTOR, stars=5,
@@ -115,6 +120,13 @@ def _seed(factory) -> int:
                 paid_at=_NOW,
             ),
         ])
+        s.flush()
+        s.add(
+            PrescriptionItem(
+                prescription_id=rx.id, drug_name="Amoxicillin", dosage="1 tablet",
+                frequency="twice a day", quantity=14, duration_days=7,
+            )
+        )
         s.commit()
         return doctor.id
 
@@ -124,8 +136,8 @@ def test_doctor_export_sheets(db):
     sheets = {sh.title: sh for sh in ExportController.doctor_export(doctor_id)}
 
     assert list(sheets) == [
-        "Patients", "Appointments", "Consultations", "Diagnoses", "Prescriptions",
-        "Reviews", "Billing",
+        "Patients", "Appointments", "Consultations", "Diagnoses",
+        "Prescriptions", "Prescription Items", "Reviews", "Billing",
     ]
 
     # Patients: one row, doctor-scoped (the other doctor's patient is excluded).
@@ -149,6 +161,15 @@ def test_doctor_export_sheets(db):
     assert len(sheets["Prescriptions"].rows) == 1
     assert "RX-1" in sheets["Prescriptions"].rows[0]
 
+    # Prescription Items: one drug line, linked to its prescription + patient.
+    items = sheets["Prescription Items"]
+    assert len(items.rows) == 1
+    item = items.rows[0]
+    assert item[items.columns.index("prescription_code")] == "RX-1"
+    assert item[items.columns.index("patient")] == "Yassine T."
+    assert item[items.columns.index("drug")] == "Amoxicillin"
+    assert item[items.columns.index("quantity")] == 14
+
     # Reviews: only inbound (patient-on-doctor) reviews, not ones the doctor wrote.
     reviews = sheets["Reviews"]
     assert len(reviews.rows) == 1
@@ -168,5 +189,5 @@ def test_export_empty_for_new_doctor(db):
         s.commit()
         doctor_id = doc.id
     sheets = ExportController.doctor_export(doctor_id)
-    assert len(sheets) == 7
+    assert len(sheets) == 8
     assert all(sh.rows == [] for sh in sheets)
