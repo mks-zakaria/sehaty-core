@@ -16,6 +16,7 @@ compile it). Failures raise the ``SehatyError`` taxonomy.
 
 import json
 import secrets
+from datetime import datetime
 
 from sehaty.db import (
     AdminConfig,
@@ -25,6 +26,7 @@ from sehaty.db import (
 )
 from sqlalchemy import select, update
 
+from sehaty.core._dto import DomainModel
 from sehaty.core.controllers.billing import BillingController
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError
@@ -35,6 +37,21 @@ _DEFAULT_REWARD = 199.0
 # Referral-code shape: unambiguous uppercase alphabet, fixed length.
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _CODE_LEN = 8
+
+
+class ReferralRow(DomainModel):
+    """A single referral this doctor made (detached projection).
+
+    The plain, id-based view returned by
+    :meth:`ReferralController.list_for_referrer` — the transport layer
+    serialises it directly.
+    """
+
+    id: int
+    referred_doctor_id: int | None
+    status: str
+    reward_amount: float | None
+    created_at: datetime
 
 
 class ReferralController:
@@ -187,18 +204,19 @@ class ReferralController:
         return amount
 
     @staticmethod
-    def list_for_referrer(doctor_id: int) -> list[Referral]:
+    def list_for_referrer(doctor_id: int) -> list[ReferralRow]:
         """Return every referral this doctor made, oldest first (for the UI)."""
         with get_session() as session:
-            return list(
-                session.execute(
+            return [
+                ReferralRow.model_validate(r)
+                for r in session.execute(
                     select(Referral)
                     .where(Referral.referrer_doctor_id == doctor_id)
                     .order_by(Referral.id)
                 )
                 .scalars()
                 .all()
-            )
+            ]
 
     @staticmethod
     def _generate_code(session) -> str:
