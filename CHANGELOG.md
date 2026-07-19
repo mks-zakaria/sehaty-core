@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.45.0 (2026-07-19)
+
+### Features
+
+- **core**: Daily patient cap enforcement + availability edit paths
+  ([#129](https://github.com/mks-zakaria/sehaty-core/pull/129),
+  [`c9b104a`](https://github.com/mks-zakaria/sehaty-core/commit/c9b104a41a30fbe171661e996ef1515ed029b7b2))
+
+
 ## v1.44.0 (2026-07-19)
 
 ### Features
