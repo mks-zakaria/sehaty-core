@@ -14,6 +14,7 @@ from sehaty.db import (
     Appointment,
     AppointmentStatus,
     AuditLog,
+    CabinetSession,
     ClinicPatient,
     DoctorProfile,
     User,
@@ -21,12 +22,14 @@ from sehaty.db import (
 )
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import (
     SehatyConflictError,
     SehatyForbiddenError,
+    SehatyNotFoundError,
 )
 from sehaty.core.services.slots import _as_utc, find_slot_end
 
@@ -87,6 +90,45 @@ class AppointmentRow(DomainModel):
     notes: str | None
 
 
+class ConsultationRow(DomainModel):
+    """The consultation (encounter) record on an appointment — the LLM-training unit.
+
+    Returned by :meth:`AppointmentController.start_consultation` /
+    :meth:`complete_consultation`: the real start/finish times plus the structured
+    clinical data the doctor recorded at the desk. Diagnoses and prescriptions are
+    separate rows that link back to this appointment.
+    """
+
+    id: int
+    status: AppointmentStatus
+    cabinet_session_id: int | None
+    consultation_started_at: datetime | None
+    consultation_ended_at: datetime | None
+    chief_complaint: str | None
+    symptoms: dict | None
+    vitals: dict | None
+    exam_notes: str | None
+
+
+class WaitingPatientRow(DomainModel):
+    """One checked-in patient in a doctor's waiting queue, with the profile to verify.
+
+    Powers the doctor's "next patient" screen: the register patient's human details
+    (name, phone, sex, birth year, prior no-shows) alongside the appointment they're
+    checked in for.
+    """
+
+    appointment_id: int
+    clinic_patient_id: int | None
+    patient_name: str
+    patient_phone: str | None
+    sex: str | None
+    birth_year: int | None
+    no_show_count: int
+    start_at: datetime
+    reason: str | None
+
+
 # Allowed status transitions per role. A transition is legal iff the target
 # status is in the set keyed by the appointment's current status.
 DOCTOR_TRANSITIONS: dict[AppointmentStatus, set[AppointmentStatus]] = {
@@ -101,6 +143,26 @@ PATIENT_TRANSITIONS: dict[AppointmentStatus, set[AppointmentStatus]] = {
     AppointmentStatus.REQUESTED: {AppointmentStatus.CANCELLED},
     AppointmentStatus.CONFIRMED: {AppointmentStatus.CANCELLED},
 }
+
+
+def _load_for_acting_doctor(
+    session: Session, appointment_id: int, doctor_id: int
+) -> Appointment:
+    """Load an appointment and assert ``doctor_id`` is its session's acting doctor.
+
+    Raises ``SehatyNotFoundError`` if the appointment is gone, ``SehatyConflictError``
+    if it was never checked in to a cabinet session, and ``SehatyForbiddenError`` if
+    the caller is not the doctor covering that session.
+    """
+    appt = session.get(Appointment, appointment_id)
+    if appt is None:
+        raise SehatyNotFoundError(f"appointment {appointment_id} not found")
+    if appt.cabinet_session_id is None:
+        raise SehatyConflictError("appointment is not checked in to a cabinet session")
+    cabinet_session = session.get(CabinetSession, appt.cabinet_session_id)
+    if cabinet_session is None or cabinet_session.acting_doctor_id != doctor_id:
+        raise SehatyForbiddenError("not the acting doctor for this appointment")
+    return appt
 
 
 class AppointmentController:
@@ -525,6 +587,171 @@ class AppointmentController:
         except Exception:
             pass
         return AppointmentRow.model_validate(appt)
+
+    @staticmethod
+    def check_in(appointment_id: int, cabinet_session_id: int) -> AppointmentRow:
+        """Secretary checks a patient in against an open cabinet session.
+
+        Moves a REQUESTED/CONFIRMED appointment to CHECKED_IN, links it to the
+        session (whose acting doctor may be a substitute covering for the owner),
+        and notifies that doctor their next patient is ready. Raises if the
+        appointment cannot be checked in, or the session is missing/closed.
+        """
+        with get_session() as session:
+            appt = session.get(Appointment, appointment_id)
+            if appt is None:
+                raise SehatyNotFoundError(f"appointment {appointment_id} not found")
+            if appt.status not in (AppointmentStatus.REQUESTED, AppointmentStatus.CONFIRMED):
+                raise SehatyConflictError(f"cannot check in a {appt.status.value} appointment")
+            cabinet_session = session.get(CabinetSession, cabinet_session_id)
+            if cabinet_session is None:
+                raise SehatyNotFoundError(f"cabinet session {cabinet_session_id} not found")
+            if not cabinet_session.is_open:
+                raise SehatyConflictError("cabinet session is closed")
+
+            appt.status = AppointmentStatus.CHECKED_IN
+            appt.cabinet_session_id = cabinet_session_id
+            acting_doctor_id = cabinet_session.acting_doctor_id
+            session.add(
+                AuditLog(
+                    actor_user_id=acting_doctor_id,
+                    action="APPT_CHECKED_IN",
+                    entity="appointment",
+                    entity_id=appt.id,
+                )
+            )
+            patient_name = None
+            if appt.clinic_patient_id is not None:
+                patient_name = session.execute(
+                    select(ClinicPatient.full_name).where(
+                        ClinicPatient.id == appt.clinic_patient_id
+                    )
+                ).scalar_one_or_none()
+            patient_name = patient_name or f"Patient #{appt.patient_id}"
+            session.flush()
+            result = AppointmentRow.model_validate(appt)
+
+        # Notify the acting doctor AFTER commit (own session, never nested). A
+        # notification failure must never break the check-in.
+        try:
+            from sehaty.core.controllers.notifications import NotificationController
+
+            NotificationController.notify(
+                acting_doctor_id,
+                kind="next_patient",
+                message=f"Next patient checked in: {patient_name}",
+                entity="appointment",
+                entity_id=appointment_id,
+            )
+        except Exception:
+            pass
+        return result
+
+    @staticmethod
+    def start_consultation(
+        appointment_id: int, doctor_id: int, now: datetime | None = None
+    ) -> ConsultationRow:
+        """The acting doctor starts the consultation (CHECKED_IN -> IN_PROGRESS)."""
+        now = datetime.now(UTC) if now is None else _as_utc(now)
+        with get_session() as session:
+            appt = _load_for_acting_doctor(session, appointment_id, doctor_id)
+            if appt.status != AppointmentStatus.CHECKED_IN:
+                raise SehatyConflictError(f"cannot start a {appt.status.value} appointment")
+            appt.status = AppointmentStatus.IN_PROGRESS
+            appt.consultation_started_at = now
+            session.add(
+                AuditLog(
+                    actor_user_id=doctor_id,
+                    action="APPT_IN_PROGRESS",
+                    entity="appointment",
+                    entity_id=appt.id,
+                )
+            )
+            session.flush()
+            return ConsultationRow.model_validate(appt)
+
+    @staticmethod
+    def complete_consultation(
+        appointment_id: int,
+        doctor_id: int,
+        *,
+        chief_complaint: str | None = None,
+        symptoms: dict | None = None,
+        vitals: dict | None = None,
+        exam_notes: str | None = None,
+        now: datetime | None = None,
+    ) -> ConsultationRow:
+        """The acting doctor finishes and records the consultation (IN_PROGRESS -> COMPLETED).
+
+        Stamps ``consultation_ended_at`` and stores the structured clinical data.
+        Diagnoses and prescriptions are separate rows that link to this appointment
+        and may be recorded any time before completion.
+        """
+        now = datetime.now(UTC) if now is None else _as_utc(now)
+        with get_session() as session:
+            appt = _load_for_acting_doctor(session, appointment_id, doctor_id)
+            if appt.status != AppointmentStatus.IN_PROGRESS:
+                raise SehatyConflictError(f"cannot complete a {appt.status.value} appointment")
+            appt.status = AppointmentStatus.COMPLETED
+            appt.consultation_ended_at = now
+            if chief_complaint is not None:
+                appt.chief_complaint = chief_complaint
+            if symptoms is not None:
+                appt.symptoms = symptoms
+            if vitals is not None:
+                appt.vitals = vitals
+            if exam_notes is not None:
+                appt.exam_notes = exam_notes
+            session.add(
+                AuditLog(
+                    actor_user_id=doctor_id,
+                    action="APPT_COMPLETED",
+                    entity="appointment",
+                    entity_id=appt.id,
+                )
+            )
+            session.flush()
+            return ConsultationRow.model_validate(appt)
+
+    @staticmethod
+    def waiting_queue(doctor_id: int) -> list[WaitingPatientRow]:
+        """The acting doctor's live queue: CHECKED_IN patients with their profile."""
+        stmt = (
+            select(
+                Appointment.id,
+                Appointment.clinic_patient_id,
+                Appointment.start_at,
+                Appointment.reason,
+                ClinicPatient.full_name,
+                ClinicPatient.phone,
+                ClinicPatient.sex,
+                ClinicPatient.birth_year,
+                ClinicPatient.no_show_count,
+            )
+            .join(CabinetSession, Appointment.cabinet_session_id == CabinetSession.id)
+            .outerjoin(ClinicPatient, Appointment.clinic_patient_id == ClinicPatient.id)
+            .where(
+                Appointment.status == AppointmentStatus.CHECKED_IN,
+                CabinetSession.acting_doctor_id == doctor_id,
+            )
+            .order_by(Appointment.start_at, Appointment.id)
+        )
+        with get_session() as session:
+            rows = session.execute(stmt).all()
+        return [
+            WaitingPatientRow(
+                appointment_id=r.id,
+                clinic_patient_id=r.clinic_patient_id,
+                patient_name=r.full_name or f"Patient #{r.id}",
+                patient_phone=r.phone,
+                sex=r.sex,
+                birth_year=r.birth_year,
+                no_show_count=r.no_show_count or 0,
+                start_at=r.start_at,
+                reason=r.reason,
+            )
+            for r in rows
+        ]
 
     @staticmethod
     def run_reminders(within_hours: int = 24, now: datetime | None = None) -> int:
