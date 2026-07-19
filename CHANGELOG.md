@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.41.0 (2026-07-19)
+
+### Features
+
+- **core**: Pharmacy stock management ([#121](https://github.com/mks-zakaria/sehaty-core/pull/121),
+  [`59be798`](https://github.com/mks-zakaria/sehaty-core/commit/59be798e22b64c79eca0ab704e3becf68ef235df))
+
+
 ## v1.40.0 (2026-07-19)
 
 ### Features
