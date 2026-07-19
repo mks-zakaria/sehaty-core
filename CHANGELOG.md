@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.45.1 (2026-07-19)
+
+### Bug Fixes
+
+- **core**: Surface clear 'day is full' message on daily cap
+  ([#131](https://github.com/mks-zakaria/sehaty-core/pull/131),
+  [`276c46b`](https://github.com/mks-zakaria/sehaty-core/commit/276c46b036cfba10df1f8041523dfd967758b093))
+
+
 ## v1.45.0 (2026-07-19)
 
 ### Features
