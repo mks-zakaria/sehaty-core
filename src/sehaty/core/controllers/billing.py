@@ -16,6 +16,7 @@ signal an error. All IO flows through ``get_session``.
 
 from datetime import UTC, datetime, timedelta
 
+from pydantic import Field
 from sehaty.db import (
     AuditLog,
     CreditLedger,
@@ -58,6 +59,50 @@ class SubscriptionSummary(DomainModel):
     current_period_end: datetime | None
 
 
+class PlanRow(DomainModel):
+    """A catalogue plan as returned by the controller (detached projection).
+
+    The transport layer serialises this directly. ``is_active`` is carried for
+    internal callers (e.g. tests) but never serialised — the plan list only ever
+    exposes active plans.
+    """
+
+    code: str
+    name: str
+    price_month: float
+    currency: str
+    is_active: bool = Field(default=None, exclude=True)
+
+
+class SubscriptionRow(DomainModel):
+    """A doctor's subscription row as returned by the controller (detached).
+
+    ``current_period_start`` is carried for internal callers but never
+    serialised — the wire contract exposes only the period *end*.
+    """
+
+    id: int
+    plan_id: int
+    status: SubscriptionStatus
+    current_period_end: datetime
+    current_period_start: datetime = Field(default=None, exclude=True)
+
+
+class PaymentRow(DomainModel):
+    """A recorded cash payment as returned by the controller (detached).
+
+    ``provider_ref`` (the paper receipt number) is carried for internal callers
+    but never serialised — the wire contract does not expose the receipt number.
+    """
+
+    id: int
+    invoice_id: int
+    amount: float
+    method: str
+    paid_at: datetime
+    provider_ref: str = Field(default=None, exclude=True)
+
+
 class BillingController:
     @staticmethod
     def seed_plans() -> list[Plan]:
@@ -85,14 +130,14 @@ class BillingController:
             return created
 
     @staticmethod
-    def list_plans() -> list[Plan]:
+    def list_plans() -> list[PlanRow]:
         """Return every active plan, ordered by monthly price."""
         stmt = select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.price_month)
         with get_session() as session:
-            return list(session.execute(stmt).scalars().all())
+            return [PlanRow.model_validate(p) for p in session.execute(stmt).scalars().all()]
 
     @staticmethod
-    def subscribe(doctor_id: int, plan_code: str) -> Subscription:
+    def subscribe(doctor_id: int, plan_code: str) -> SubscriptionRow:
         """Start (or switch) a doctor's subscription to ``plan_code``.
 
         Sets the subscription ``ACTIVE`` with a one-month current period from
@@ -118,7 +163,7 @@ class BillingController:
             sub.current_period_start = now
             sub.current_period_end = now + _PERIOD
             session.flush()
-            return sub
+            return SubscriptionRow.model_validate(sub)
 
     @staticmethod
     def generate_invoice(doctor_id: int) -> Invoice:
@@ -176,7 +221,7 @@ class BillingController:
         amount: float,
         receipt_no: str,
         paid_at: datetime,
-    ) -> Payment:
+    ) -> PaymentRow:
         """Record cash handed over at the desk against an invoice (ADMIN only).
 
         Idempotent per ``receipt_no``: the paper receipt number is stored as the
@@ -205,7 +250,7 @@ class BillingController:
                 select(Payment).where(Payment.provider_ref == receipt_no)
             ).scalar_one_or_none()
             if existing is not None:
-                return existing
+                return PaymentRow.model_validate(existing)
 
             invoice = session.get(Invoice, invoice_id)
             if invoice is None:
@@ -268,7 +313,7 @@ class BillingController:
             from sehaty.core.controllers.referral import ReferralController
 
             ReferralController.settle_first_payment(doctor_id)
-        return payment
+        return PaymentRow.model_validate(payment)
 
     @staticmethod
     def apply_credit(
