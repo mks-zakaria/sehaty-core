@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.48.0 (2026-07-19)
+
+### Features
+
+- **core**: Patient phone+password auth (no OTP)
+  ([#137](https://github.com/mks-zakaria/sehaty-core/pull/137),
+  [`4b399b4`](https://github.com/mks-zakaria/sehaty-core/commit/4b399b4d63f2931a2b17e4266cf2338f09c703bf))
+
+
 ## v1.47.0 (2026-07-19)
 
 ### Features
