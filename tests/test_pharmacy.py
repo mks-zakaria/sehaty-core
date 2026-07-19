@@ -145,3 +145,33 @@ def test_cannot_dispense_expired(db):
         PharmacyController.dispense(
             pharmacy, code, [{"prescription_item_id": i1, "quantity": 1}], now=_NOW
         )
+
+
+def test_stock_list_save_and_search(db):
+    pharmacy, _code, _i1, _i2, med = _seed(db)  # seed made stock qty 100 for med
+
+    stock = PharmacyController.list_stock(pharmacy)
+    assert len(stock) == 1
+    assert stock[0].medication == "Amoxicillin" and stock[0].quantity == 100
+    assert not stock[0].is_low
+
+    # Update the same (pharmacy, medication) row -> now low.
+    row = PharmacyController.save_stock(pharmacy, med, quantity=5, price=12.5, low_threshold=10)
+    assert row.quantity == 5 and row.price == 12.5 and row.is_low
+    assert len(PharmacyController.list_stock(pharmacy, low_only=True)) == 1
+
+    # Catalogue search.
+    assert any(m.id == med for m in PharmacyController.search_medications("amox"))
+    assert PharmacyController.search_medications("  ") == []
+
+
+def test_save_stock_creates_new_row(db):
+    pharmacy, *_ = _seed(db)
+    with db() as s:
+        m2 = Medication(inn_name="Ibuprofen", form="tablet")
+        s.add(m2)
+        s.commit()
+        m2_id = m2.id
+    row = PharmacyController.save_stock(pharmacy, m2_id, quantity=50)
+    assert row.medication == "Ibuprofen" and row.quantity == 50
+    assert len(PharmacyController.list_stock(pharmacy)) == 2

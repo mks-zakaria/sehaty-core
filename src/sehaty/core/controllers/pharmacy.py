@@ -73,6 +73,29 @@ class DispenseRow(DomainModel):
     items: list[DispenseItemRow]
 
 
+class StockRow(DomainModel):
+    """One medication in a pharmacy's stock (``is_low`` when at/under threshold)."""
+
+    id: int
+    medication_id: int
+    medication: str
+    brand: str | None
+    form: str
+    quantity: int
+    price: float | None
+    low_threshold: int
+    is_low: bool
+
+
+class MedicationRow(DomainModel):
+    """A catalogue medication, for the add-stock picker."""
+
+    id: int
+    name: str
+    brand: str | None
+    form: str
+
+
 def _as_utc(dt: datetime) -> datetime:
     """Normalise a (possibly SQLite-naive) datetime to UTC-aware."""
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
@@ -240,4 +263,116 @@ class PharmacyController:
                 dispensed_at=dispense.dispensed_at,
                 notes=dispense.notes,
                 items=recorded,
+            )
+
+    @staticmethod
+    def list_stock(
+        pharmacy_id: int, search: str | None = None, low_only: bool = False
+    ) -> list[StockRow]:
+        """A pharmacy's medication stock (optionally filtered by name / low-only)."""
+        stmt = (
+            select(
+                PharmacyStock.id,
+                PharmacyStock.medication_id,
+                Medication.inn_name,
+                Medication.brand_name,
+                Medication.form,
+                PharmacyStock.quantity,
+                PharmacyStock.price,
+                PharmacyStock.low_threshold,
+            )
+            .join(Medication, PharmacyStock.medication_id == Medication.id)
+            .where(PharmacyStock.pharmacy_id == pharmacy_id)
+            .order_by(Medication.inn_name)
+        )
+        if search and search.strip():
+            like = f"%{search.strip()}%"
+            stmt = stmt.where(Medication.inn_name.ilike(like) | Medication.brand_name.ilike(like))
+        with get_session() as session:
+            rows = session.execute(stmt).all()
+        out = [
+            StockRow(
+                id=r.id,
+                medication_id=r.medication_id,
+                medication=r.inn_name,
+                brand=r.brand_name,
+                form=r.form,
+                quantity=r.quantity,
+                price=r.price,
+                low_threshold=r.low_threshold,
+                is_low=r.quantity <= r.low_threshold,
+            )
+            for r in rows
+        ]
+        return [s for s in out if s.is_low] if low_only else out
+
+    @staticmethod
+    def search_medications(query: str, limit: int = 20) -> list[MedicationRow]:
+        """Search the medication catalogue by INN / brand name (for the picker)."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        like = f"%{q}%"
+        with get_session() as session:
+            rows = session.execute(
+                select(
+                    Medication.id, Medication.inn_name, Medication.brand_name, Medication.form
+                )
+                .where(Medication.inn_name.ilike(like) | Medication.brand_name.ilike(like))
+                .order_by(Medication.inn_name)
+                .limit(limit)
+            ).all()
+        return [
+            MedicationRow(id=r.id, name=r.inn_name, brand=r.brand_name, form=r.form) for r in rows
+        ]
+
+    @staticmethod
+    def save_stock(
+        pharmacy_id: int,
+        medication_id: int,
+        quantity: int,
+        price: float | None = None,
+        low_threshold: int = 10,
+    ) -> StockRow:
+        """Create or update the stock row for ``(pharmacy, medication)``."""
+        if quantity < 0 or low_threshold < 0:
+            raise SehatyValidationError("quantity and threshold must be non-negative")
+        with get_session() as session:
+            med = session.execute(
+                select(Medication.inn_name, Medication.brand_name, Medication.form).where(
+                    Medication.id == medication_id
+                )
+            ).one_or_none()
+            if med is None:
+                raise SehatyNotFoundError(f"medication {medication_id} not found")
+            stock = session.execute(
+                select(PharmacyStock).where(
+                    PharmacyStock.pharmacy_id == pharmacy_id,
+                    PharmacyStock.medication_id == medication_id,
+                )
+            ).scalar_one_or_none()
+            if stock is None:
+                stock = PharmacyStock(
+                    pharmacy_id=pharmacy_id,
+                    medication_id=medication_id,
+                    quantity=quantity,
+                    price=price,
+                    low_threshold=low_threshold,
+                )
+                session.add(stock)
+            else:
+                stock.quantity = quantity
+                stock.price = price
+                stock.low_threshold = low_threshold
+            session.flush()
+            return StockRow(
+                id=stock.id,
+                medication_id=medication_id,
+                medication=med.inn_name,
+                brand=med.brand_name,
+                form=med.form,
+                quantity=quantity,
+                price=price,
+                low_threshold=low_threshold,
+                is_low=quantity <= low_threshold,
             )
