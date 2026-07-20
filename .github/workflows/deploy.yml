@@ -1,0 +1,58 @@
+name: deploy
+
+# Auto-deploy to the DigitalOcean droplet on every push to main.
+#
+# The deployable unit is the sehaty-api image, which is BUILT from all three
+# backend repos (sehaty-api + its sibling path deps sehaty-core and sehaty-db).
+# So a push to ANY of them redeploys the whole stack: hard-reset all three
+# checkouts to origin/main, rebuild the image, and recreate the compose
+# services. The `migrate` service runs `alembic upgrade head` before `api`
+# starts (see deploy/docker-compose.prod.yml).
+#
+# One-time droplet prerequisites:
+#   - the three repos cloned as siblings under /opt/sehaty, with the droplet
+#     holding read access to them (e.g. a GitHub deploy key)
+#   - /opt/sehaty/sehaty-api/deploy/.env filled in (see deploy/.env.example)
+#   - Docker + the compose plugin installed
+#
+# Required secrets (repo or org level): DO_HOST, DO_USER, DO_SSH_KEY.
+# Until DO_HOST is set the deploy step is skipped (a green no-op).
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: sehaty-droplet-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DO_HOST: ${{ secrets.DO_HOST }}
+    steps:
+      - name: Deploy via SSH
+        if: ${{ env.DO_HOST != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script_stop: true
+          command_timeout: 20m
+          # appleboy runs this under the droplet's login shell; keep every line a
+          # single standalone command (no multi-line if/for/case constructs — the
+          # shell fails to parse them and aborts the whole script).
+          script: |
+            set -eu
+            cd /opt/sehaty/sehaty-db && git fetch origin main && git reset --hard origin/main
+            cd /opt/sehaty/sehaty-core && git fetch origin main && git reset --hard origin/main
+            cd /opt/sehaty/sehaty-api && git fetch origin main && git reset --hard origin/main
+            cd /opt/sehaty/sehaty-api/deploy
+            docker compose -f docker-compose.prod.yml --env-file .env build
+            docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans
+            docker image prune -f
