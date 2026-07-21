@@ -15,7 +15,13 @@ ORM objects. Failures raise the ``SehatyError`` taxonomy; methods never return
 
 from datetime import UTC, datetime
 
-from sehaty.db import ClinicPatient, PatientCharge, PatientPayment, PaymentMethod
+from sehaty.db import (
+    ClinicPatient,
+    DoctorProfile,
+    PatientCharge,
+    PatientPayment,
+    PaymentMethod,
+)
 from sqlalchemy import func, select
 
 from sehaty.core._dto import DomainModel
@@ -66,6 +72,27 @@ class DebtorRow(DomainModel):
     total_charged: float
     total_paid: float
     balance: float
+
+
+class MyDebtCharge(DomainModel):
+    """One of the signed-in patient's own charges, with the treating doctor."""
+
+    id: int
+    doctor_name: str | None
+    doctor_slug: str | None
+    label: str
+    total_amount: float
+    currency: str
+    paid_amount: float
+    balance: float
+    created_at: datetime
+
+
+class MyDebtsSummary(DomainModel):
+    """The signed-in patient's charges across every doctor, with the total due."""
+
+    charges: list[MyDebtCharge]
+    total_outstanding: float
 
 
 def _charge_row(charge: PatientCharge) -> ChargeRow:
@@ -337,3 +364,63 @@ class PatientLedgerController:
             )
             for r in rows
         ]
+
+    @staticmethod
+    def my_debts(user_id: int) -> MyDebtsSummary:
+        """Every charge billed to the signed-in patient, across all their doctors.
+
+        A patient is linked to a doctor's register via ``clinic_patients.user_id``;
+        this gathers the charges on all such rows, derives each balance from the
+        summed payments, and names the treating doctor. Charges are newest first;
+        ``total_outstanding`` sums only the still-unpaid balances.
+        """
+        # Sum payments per charge first so a charge with N payments isn't counted
+        # N times when joined.
+        per_charge_paid = (
+            select(
+                PatientPayment.charge_id.label("charge_id"),
+                func.sum(PatientPayment.amount).label("paid"),
+            )
+            .group_by(PatientPayment.charge_id)
+            .subquery()
+        )
+        stmt = (
+            select(
+                PatientCharge.id,
+                PatientCharge.label,
+                PatientCharge.total_amount,
+                PatientCharge.currency,
+                PatientCharge.created_at,
+                DoctorProfile.full_name.label("doctor_name"),
+                DoctorProfile.slug.label("doctor_slug"),
+                func.coalesce(per_charge_paid.c.paid, 0.0).label("paid"),
+            )
+            .join(ClinicPatient, ClinicPatient.id == PatientCharge.clinic_patient_id)
+            .outerjoin(DoctorProfile, DoctorProfile.user_id == PatientCharge.doctor_id)
+            .outerjoin(per_charge_paid, per_charge_paid.c.charge_id == PatientCharge.id)
+            .where(ClinicPatient.user_id == user_id)
+            .order_by(PatientCharge.created_at.desc(), PatientCharge.id.desc())
+        )
+        with get_session() as session:
+            rows = session.execute(stmt).all()
+
+        charges: list[MyDebtCharge] = []
+        outstanding = 0.0
+        for r in rows:
+            paid = float(r.paid or 0.0)
+            balance = round(float(r.total_amount) - paid, 2)
+            outstanding += max(balance, 0.0)
+            charges.append(
+                MyDebtCharge(
+                    id=r.id,
+                    doctor_name=r.doctor_name,
+                    doctor_slug=r.doctor_slug,
+                    label=r.label,
+                    total_amount=float(r.total_amount),
+                    currency=r.currency,
+                    paid_amount=round(paid, 2),
+                    balance=balance,
+                    created_at=r.created_at,
+                )
+            )
+        return MyDebtsSummary(charges=charges, total_outstanding=round(outstanding, 2))
