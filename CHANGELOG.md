@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.49.0 (2026-07-21)
+
+### Continuous Integration
+
+- Auto-deploy to the droplet on push to main
+  ([#139](https://github.com/mks-zakaria/sehaty-core/pull/139),
+  [`66dcf3d`](https://github.com/mks-zakaria/sehaty-core/commit/66dcf3d67ca7e828fc876b060e2848e4a903ebf8))
+
+### Features
+
+- **core**: Patient debt-ledger controller (charges, instalments, debtors)
+  ([`11e7b46`](https://github.com/mks-zakaria/sehaty-core/commit/11e7b46a15311a285e36a1030520ca526af79826))
+
+
 ## v1.48.0 (2026-07-19)
 
 ### Features
