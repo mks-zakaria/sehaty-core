@@ -11,6 +11,7 @@ Two entry paths:
 * patients authenticate passwordlessly via a phone OTP.
 """
 
+from pydantic import field_validator
 from sehaty.db import DoctorProfile, RefreshToken, User, UserRole, VerificationStatus
 from sqlalchemy import select
 
@@ -33,6 +34,18 @@ from sehaty.core.security import (
     verify_password,
 )
 
+# Domains used for accounts that never supplied a real address. ``User.email`` is
+# NOT NULL and unique, so a phone-only patient gets a synthesised one and an
+# imported doctor gets a placeholder. Neither is an address anybody can be
+# reached at, and showing one back to a patient as "your email" is worse than
+# showing nothing — they cannot tell it is not real.
+_PLACEHOLDER_EMAIL_DOMAINS = ("@sehaty.local", "@import.invalid")
+
+
+def is_placeholder_email(email: str | None) -> bool:
+    """True when this address was synthesised rather than given by the user."""
+    return bool(email) and email.lower().endswith(_PLACEHOLDER_EMAIL_DOMAINS)
+
 
 class MeView(DomainModel):
     """The authenticated user's public identity (detached projection).
@@ -47,6 +60,19 @@ class MeView(DomainModel):
     role: str
     email: str | None
     phone: str | None
+
+    @field_validator("email", mode="after")
+    @classmethod
+    def _hide_placeholder_email(cls, value: str | None) -> str | None:
+        """Never surface a synthesised address as the user's own email.
+
+        A phone-registered patient has ``phone+2126...@sehaty.local`` stored to
+        satisfy the NOT NULL/unique constraint. Returning it made the account
+        screen display it as their contact email, which is both wrong and
+        unactionable — mail sent there goes nowhere. Normalised here, on the
+        projection, so every caller of ``MeView`` is fixed rather than one page.
+        """
+        return None if is_placeholder_email(value) else value
 
 
 def _token_bundle(user: User, refresh: str) -> dict:
