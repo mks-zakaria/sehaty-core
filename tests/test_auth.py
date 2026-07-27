@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from sehaty.core import security
-from sehaty.core.controllers.auth import AuthController
+from sehaty.core.controllers.auth import AuthController, MeView
 from sehaty.core.db import session as session_mod
 from sehaty.core.errors import (
     SehatyConflictError,
@@ -348,3 +348,49 @@ def test_register_upgrades_passwordless_phone(db: sessionmaker[Session]) -> None
     bundle = AuthController.register_patient("+212650000004", "secret123")
     assert bundle["role"] == UserRole.PATIENT
     assert AuthController.login_patient("+212650000004", "secret123")["access"]
+
+
+class TestPlaceholderEmail:
+    """A synthesised address must never be shown back as the user's own email.
+
+    Phone-registered patients get ``phone+2126...@sehaty.local`` so the NOT NULL
+    and unique constraints on ``User.email`` hold. That string is not an address
+    anybody can be reached at, and the account screen was rendering it under
+    "Email" — worse than showing nothing, because a patient cannot tell it is
+    not real.
+    """
+
+    def _user(self, email: str | None):
+        class _U:
+            id = 1
+            role = "PATIENT"
+            phone = "+212708009645"
+
+        _U.email = email
+        return _U()
+
+    def test_synthesised_phone_email_is_hidden(self) -> None:
+        view = MeView.model_validate(self._user("phone+212708009645@sehaty.local"))
+        assert view.email is None
+        # The phone is the real contact detail and must survive.
+        assert view.phone == "+212708009645"
+
+    def test_imported_doctor_placeholder_is_hidden(self) -> None:
+        assert MeView.model_validate(self._user("dr-amina@import.invalid")).email is None
+
+    def test_a_real_address_is_preserved(self) -> None:
+        assert MeView.model_validate(self._user("amina@gmail.com")).email == "amina@gmail.com"
+
+    def test_matching_is_case_insensitive(self) -> None:
+        assert MeView.model_validate(self._user("Phone+212@SEHATY.LOCAL")).email is None
+
+    def test_a_lookalike_real_domain_is_not_hidden(self) -> None:
+        # Only the exact placeholder domains are hidden — not anything that
+        # merely contains the word.
+        assert (
+            MeView.model_validate(self._user("me@sehaty.localhost.ma")).email
+            == "me@sehaty.localhost.ma"
+        )
+
+    def test_absent_email_stays_absent(self) -> None:
+        assert MeView.model_validate(self._user(None)).email is None
