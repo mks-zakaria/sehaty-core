@@ -18,6 +18,7 @@ from sqlalchemy import select, update
 from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError
+from sehaty.core.services.entitlement import start_trial_if_absent
 
 
 class PendingProfessional(DomainModel):
@@ -202,8 +203,16 @@ class AdminController:
 
     @staticmethod
     def accredit(admin_id: int, user_id: int) -> None:
-        """Mark the doctor VERIFIED and record an ``ACCREDIT`` audit entry."""
+        """Mark the doctor VERIFIED, start their trial, and audit the change.
+
+        Accreditation is the moment a doctor goes live, so it is also the moment
+        the free trial starts: without a subscription row the entitlement check
+        switches their agenda off, and a doctor accredited into a dead calendar
+        is worse than one who was never accredited. Doctors who already have a
+        subscription (a renewal, a re-accreditation) are left untouched.
+        """
         AdminController._set_status(admin_id, user_id, VerificationStatus.VERIFIED, "ACCREDIT")
+        start_trial_if_absent(user_id)
 
     @staticmethod
     def revoke(admin_id: int, user_id: int) -> None:

@@ -47,6 +47,7 @@ def _waiting_alerts(factory, doctor_id: int) -> int:
             ).all()
         )
 
+
 _TABLES = [
     User.__table__,
     ClinicPatient.__table__,
@@ -128,14 +129,14 @@ def test_full_consultation_flow_with_substitute(db):
     # The ACTING doctor (substitute), not the owner, was notified.
     with db() as s:
         kinds_sub = [
-            n.kind for n in s.execute(
+            n.kind
+            for n in s.execute(
                 select(Notification).where(Notification.user_id == substitute)
             ).scalars()
         ]
         kinds_owner = [
-            n.kind for n in s.execute(
-                select(Notification).where(Notification.user_id == owner)
-            ).scalars()
+            n.kind
+            for n in s.execute(select(Notification).where(Notification.user_id == owner)).scalars()
         ]
     assert "next_patient" in kinds_sub
     assert "next_patient" not in kinds_owner

@@ -74,8 +74,14 @@ class ExportController:
             reviews = ExportController._reviews(session, doctor_id)
             billing = ExportController._billing(session, doctor_id)
         return [
-            patients, appointments, consultations, diagnoses,
-            prescriptions, items, reviews, billing,
+            patients,
+            appointments,
+            consultations,
+            diagnoses,
+            prescriptions,
+            items,
+            reviews,
+            billing,
         ]
 
     @staticmethod
@@ -91,8 +97,16 @@ class ExportController:
     @staticmethod
     def _patients(session, doctor_id: int) -> ExportSheet:
         cols = [
-            "id", "name", "phone", "email", "sex", "birth_year",
-            "no_show_count", "tags", "notes", "created_at",
+            "id",
+            "name",
+            "phone",
+            "email",
+            "sex",
+            "birth_year",
+            "no_show_count",
+            "tags",
+            "notes",
+            "created_at",
         ]
         rows = session.execute(
             select(
@@ -128,8 +142,14 @@ class ExportController:
             .order_by(Appointment.start_at.desc())
         ).all()
         out = [
-            [_cell(r.id), names.get(r.clinic_patient_id), _cell(r.start_at),
-             _cell(r.end_at), _cell(r.status), _cell(r.reason)]
+            [
+                _cell(r.id),
+                names.get(r.clinic_patient_id),
+                _cell(r.start_at),
+                _cell(r.end_at),
+                _cell(r.status),
+                _cell(r.reason),
+            ]
             for r in rows
         ]
         return ExportSheet("Appointments", cols, out)
@@ -137,8 +157,14 @@ class ExportController:
     @staticmethod
     def _consultations(session, doctor_id: int, names: dict[int, str]) -> ExportSheet:
         cols = [
-            "appointment_id", "patient", "started_at", "ended_at",
-            "chief_complaint", "symptoms", "vitals", "exam_notes",
+            "appointment_id",
+            "patient",
+            "started_at",
+            "ended_at",
+            "chief_complaint",
+            "symptoms",
+            "vitals",
+            "exam_notes",
         ]
         rows = session.execute(
             select(
@@ -158,9 +184,16 @@ class ExportController:
             .order_by(Appointment.consultation_started_at.desc())
         ).all()
         out = [
-            [_cell(r.id), names.get(r.clinic_patient_id), _cell(r.consultation_started_at),
-             _cell(r.consultation_ended_at), _cell(r.chief_complaint), _cell(r.symptoms),
-             _cell(r.vitals), _cell(r.exam_notes)]
+            [
+                _cell(r.id),
+                names.get(r.clinic_patient_id),
+                _cell(r.consultation_started_at),
+                _cell(r.consultation_ended_at),
+                _cell(r.chief_complaint),
+                _cell(r.symptoms),
+                _cell(r.vitals),
+                _cell(r.exam_notes),
+            ]
             for r in rows
         ]
         return ExportSheet("Consultations", cols, out)
@@ -181,8 +214,14 @@ class ExportController:
             .order_by(Diagnosis.diagnosed_at.desc())
         ).all()
         out = [
-            [_cell(r.id), names.get(r.clinic_patient_id), _cell(r.label),
-             _cell(r.icd10), _cell(r.notes), _cell(r.diagnosed_at)]
+            [
+                _cell(r.id),
+                names.get(r.clinic_patient_id),
+                _cell(r.label),
+                _cell(r.icd10),
+                _cell(r.notes),
+                _cell(r.diagnosed_at),
+            ]
             for r in rows
         ]
         return ExportSheet("Diagnoses", cols, out)
@@ -204,8 +243,15 @@ class ExportController:
             .order_by(Prescription.issued_at.desc())
         ).all()
         out = [
-            [_cell(r.id), names.get(r.clinic_patient_id), _cell(r.code), _cell(r.status),
-             _cell(r.issued_at), _cell(r.expires_at), _cell(r.notes)]
+            [
+                _cell(r.id),
+                names.get(r.clinic_patient_id),
+                _cell(r.code),
+                _cell(r.status),
+                _cell(r.issued_at),
+                _cell(r.expires_at),
+                _cell(r.notes),
+            ]
             for r in rows
         ]
         return ExportSheet("Prescriptions", cols, out)
@@ -213,8 +259,15 @@ class ExportController:
     @staticmethod
     def _prescription_items(session, doctor_id: int, names: dict[int, str]) -> ExportSheet:
         cols = [
-            "item_id", "prescription_code", "patient", "drug", "dosage",
-            "frequency", "duration_days", "quantity", "instructions",
+            "item_id",
+            "prescription_code",
+            "patient",
+            "drug",
+            "dosage",
+            "frequency",
+            "duration_days",
+            "quantity",
+            "instructions",
         ]
         rows = session.execute(
             select(
@@ -235,10 +288,18 @@ class ExportController:
             .order_by(Prescription.issued_at.desc(), PrescriptionItem.id)
         ).all()
         out = [
-            [_cell(r.id), _cell(r.code), names.get(r.clinic_patient_id),
-             # A free-typed drug name, else the linked medication's INN name.
-             _cell(r.drug_name or r.inn_name), _cell(r.dosage), _cell(r.frequency),
-             _cell(r.duration_days), _cell(r.quantity), _cell(r.instructions)]
+            [
+                _cell(r.id),
+                _cell(r.code),
+                names.get(r.clinic_patient_id),
+                # A free-typed drug name, else the linked medication's INN name.
+                _cell(r.drug_name or r.inn_name),
+                _cell(r.dosage),
+                _cell(r.frequency),
+                _cell(r.duration_days),
+                _cell(r.quantity),
+                _cell(r.instructions),
+            ]
             for r in rows
         ]
         return ExportSheet("Prescription Items", cols, out)

@@ -298,12 +298,16 @@ class SaleController:
     def list_sales(pharmacy_id: int, limit: int = 50) -> list[SaleRow]:
         """Recent sales (newest first) with their lines — the sales history."""
         with get_session() as session:
-            sales = session.execute(
-                select(Sale)
-                .where(Sale.pharmacy_id == pharmacy_id)
-                .order_by(Sale.sold_at.desc(), Sale.id.desc())
-                .limit(limit)
-            ).scalars().all()
+            sales = (
+                session.execute(
+                    select(Sale)
+                    .where(Sale.pharmacy_id == pharmacy_id)
+                    .order_by(Sale.sold_at.desc(), Sale.id.desc())
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
             out: list[SaleRow] = []
             for sale in sales:
                 items = session.execute(

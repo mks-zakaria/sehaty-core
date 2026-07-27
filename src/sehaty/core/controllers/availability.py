@@ -105,8 +105,7 @@ class AvailabilityController:
         )
         with get_session() as session:
             return [
-                AvailabilityRow.model_validate(a)
-                for a in session.execute(stmt).scalars().all()
+                AvailabilityRow.model_validate(a) for a in session.execute(stmt).scalars().all()
             ]
 
     @staticmethod

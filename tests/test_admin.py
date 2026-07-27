@@ -10,7 +10,15 @@ column-only projections, so ``geopoint`` is never selected.
 import pytest
 from geoalchemy2 import Geography
 from geoalchemy2 import functions as geo_functions
-from sehaty.db import AuditLog, DoctorProfile, User, UserRole, VerificationStatus
+from sehaty.db import (
+    AuditLog,
+    DoctorProfile,
+    Plan,
+    Subscription,
+    User,
+    UserRole,
+    VerificationStatus,
+)
 from sehaty.db.base import SehatyBase
 from sqlalchemy import create_engine, select
 from sqlalchemy.ext.compiler import compiles
@@ -35,6 +43,9 @@ def _geog_bind_passthrough_on_sqlite(element, compiler, **kw) -> str:
 
 
 _TABLES = [
+    # Accreditation now starts a TRIALING subscription.
+    Plan.__table__,
+    Subscription.__table__,
     User.__table__,
     DoctorProfile.__table__,
     AuditLog.__table__,

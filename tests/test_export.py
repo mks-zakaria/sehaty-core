@@ -71,60 +71,97 @@ def _seed(factory) -> int:
         s.add_all([cp, other_cp])
         s.flush()
         rx = Prescription(
-            doctor_id=doctor.id, clinic_patient_id=cp.id, code="RX-1", qr_token="tok-1",
-            status=PrescriptionStatus.ISSUED, issued_at=_NOW,
+            doctor_id=doctor.id,
+            clinic_patient_id=cp.id,
+            code="RX-1",
+            qr_token="tok-1",
+            status=PrescriptionStatus.ISSUED,
+            issued_at=_NOW,
             expires_at=_NOW + timedelta(days=30),
         )
         appt_done = Appointment(
-            patient_id=doctor.id, doctor_id=doctor.id, clinic_patient_id=cp.id,
-            start_at=_NOW - timedelta(days=1), end_at=_NOW - timedelta(days=1),
+            patient_id=doctor.id,
+            doctor_id=doctor.id,
+            clinic_patient_id=cp.id,
+            start_at=_NOW - timedelta(days=1),
+            end_at=_NOW - timedelta(days=1),
             status=AppointmentStatus.COMPLETED,
             consultation_started_at=_NOW - timedelta(days=1),
             consultation_ended_at=_NOW - timedelta(days=1),
-            chief_complaint="cough", vitals={"temp_c": 38.2},
+            chief_complaint="cough",
+            vitals={"temp_c": 38.2},
         )
-        s.add_all([
-            Appointment(
-                patient_id=doctor.id, doctor_id=doctor.id, clinic_patient_id=cp.id,
-                start_at=_NOW, end_at=_NOW + timedelta(minutes=30),
-                status=AppointmentStatus.CONFIRMED,
-            ),
-            appt_done,
-            # A completed appointment for another doctor — must NOT appear.
-            Appointment(
-                patient_id=other.id, doctor_id=other.id, clinic_patient_id=other_cp.id,
-                start_at=_NOW, end_at=_NOW, status=AppointmentStatus.COMPLETED,
-                consultation_started_at=_NOW,
-            ),
-        ])
+        s.add_all(
+            [
+                Appointment(
+                    patient_id=doctor.id,
+                    doctor_id=doctor.id,
+                    clinic_patient_id=cp.id,
+                    start_at=_NOW,
+                    end_at=_NOW + timedelta(minutes=30),
+                    status=AppointmentStatus.CONFIRMED,
+                ),
+                appt_done,
+                # A completed appointment for another doctor — must NOT appear.
+                Appointment(
+                    patient_id=other.id,
+                    doctor_id=other.id,
+                    clinic_patient_id=other_cp.id,
+                    start_at=_NOW,
+                    end_at=_NOW,
+                    status=AppointmentStatus.COMPLETED,
+                    consultation_started_at=_NOW,
+                ),
+            ]
+        )
         s.flush()
-        s.add_all([
-            Diagnosis(
-                doctor_id=doctor.id, clinic_patient_id=cp.id, label="Flu",
-                diagnosed_at=_NOW,
-            ),
-            rx,
-            Review(
-                author_id=other.id, target_id=doctor.id, appointment_id=appt_done.id,
-                direction=ReviewDirection.PATIENT_ON_DOCTOR, stars=5,
-                comment="Great doctor", status=ReviewStatus.PUBLISHED,
-            ),
-            # A review the doctor authored about a patient — NOT their inbound reviews.
-            Review(
-                author_id=doctor.id, target_id=other.id, appointment_id=appt_done.id,
-                direction=ReviewDirection.DOCTOR_ON_PATIENT, stars=3, status=ReviewStatus.PUBLISHED,
-            ),
-            Invoice(
-                doctor_id=doctor.id, amount=200.0, currency="MAD",
-                status=InvoiceStatus.PAID, issued_at=_NOW, due_at=_NOW + timedelta(days=7),
-                paid_at=_NOW,
-            ),
-        ])
+        s.add_all(
+            [
+                Diagnosis(
+                    doctor_id=doctor.id,
+                    clinic_patient_id=cp.id,
+                    label="Flu",
+                    diagnosed_at=_NOW,
+                ),
+                rx,
+                Review(
+                    author_id=other.id,
+                    target_id=doctor.id,
+                    appointment_id=appt_done.id,
+                    direction=ReviewDirection.PATIENT_ON_DOCTOR,
+                    stars=5,
+                    comment="Great doctor",
+                    status=ReviewStatus.PUBLISHED,
+                ),
+                # A review the doctor authored about a patient — NOT their inbound reviews.
+                Review(
+                    author_id=doctor.id,
+                    target_id=other.id,
+                    appointment_id=appt_done.id,
+                    direction=ReviewDirection.DOCTOR_ON_PATIENT,
+                    stars=3,
+                    status=ReviewStatus.PUBLISHED,
+                ),
+                Invoice(
+                    doctor_id=doctor.id,
+                    amount=200.0,
+                    currency="MAD",
+                    status=InvoiceStatus.PAID,
+                    issued_at=_NOW,
+                    due_at=_NOW + timedelta(days=7),
+                    paid_at=_NOW,
+                ),
+            ]
+        )
         s.flush()
         s.add(
             PrescriptionItem(
-                prescription_id=rx.id, drug_name="Amoxicillin", dosage="1 tablet",
-                frequency="twice a day", quantity=14, duration_days=7,
+                prescription_id=rx.id,
+                drug_name="Amoxicillin",
+                dosage="1 tablet",
+                frequency="twice a day",
+                quantity=14,
+                duration_days=7,
             )
         )
         s.commit()
@@ -136,8 +173,14 @@ def test_doctor_export_sheets(db):
     sheets = {sh.title: sh for sh in ExportController.doctor_export(doctor_id)}
 
     assert list(sheets) == [
-        "Patients", "Appointments", "Consultations", "Diagnoses",
-        "Prescriptions", "Prescription Items", "Reviews", "Billing",
+        "Patients",
+        "Appointments",
+        "Consultations",
+        "Diagnoses",
+        "Prescriptions",
+        "Prescription Items",
+        "Reviews",
+        "Billing",
     ]
 
     # Patients: one row, doctor-scoped (the other doctor's patient is excluded).

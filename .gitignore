@@ -7,3 +7,6 @@ __pycache__/
 .mypy_cache/
 dist/
 *.egg-info/
+
+# Local agent session files
+.claude/

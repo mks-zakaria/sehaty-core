@@ -64,24 +64,36 @@ def _seed(factory, *, status=PrescriptionStatus.ISSUED, expires=_NOW + timedelta
         s.add_all([doctor, pharmacy, med])
         s.flush()
         rx = Prescription(
-            doctor_id=doctor.id, code="RX-P1", qr_token="tok-p1", status=status,
-            issued_at=_NOW, expires_at=expires,
+            doctor_id=doctor.id,
+            code="RX-P1",
+            qr_token="tok-p1",
+            status=status,
+            issued_at=_NOW,
+            expires_at=expires,
         )
         s.add(rx)
         s.flush()
         item1 = PrescriptionItem(
-            prescription_id=rx.id, medication_id=med.id, dosage="1 tab",
-            frequency="2x/day", quantity=10,
+            prescription_id=rx.id,
+            medication_id=med.id,
+            dosage="1 tab",
+            frequency="2x/day",
+            quantity=10,
         )
         item2 = PrescriptionItem(
-            prescription_id=rx.id, drug_name="Paracetamol", dosage="1 tab",
-            frequency="3x/day", quantity=20,
+            prescription_id=rx.id,
+            drug_name="Paracetamol",
+            dosage="1 tab",
+            frequency="3x/day",
+            quantity=20,
         )
-        s.add_all([
-            item1,
-            item2,
-            PharmacyStock(pharmacy_id=pharmacy.id, medication_id=med.id, quantity=100),
-        ])
+        s.add_all(
+            [
+                item1,
+                item2,
+                PharmacyStock(pharmacy_id=pharmacy.id, medication_id=med.id, quantity=100),
+            ]
+        )
         s.commit()
         return pharmacy.id, rx.code, item1.id, item2.id, med.id
 
@@ -105,7 +117,8 @@ def test_lookup_unknown_code(db):
 def test_dispense_partial_updates_and_decrements_stock(db):
     pharmacy, code, i1, i2, med = _seed(db)
     result = PharmacyController.dispense(
-        pharmacy, code,
+        pharmacy,
+        code,
         [{"prescription_item_id": i1, "quantity": 4}, {"prescription_item_id": i2, "quantity": 5}],
     )
     assert result.prescription_code == "RX-P1"

@@ -25,14 +25,16 @@ def db() -> sessionmaker[Session]:
 
 def test_search_by_inn_and_brand(db):
     with db() as s:
-        s.add_all([
-            Medication(
-                inn_name="Amoxicillin", brand_name="Clamoxyl", form="tablet", strength="500mg"
-            ),
-            Medication(
-                inn_name="Paracetamol", brand_name="Doliprane", form="tablet", strength="1g"
-            ),
-        ])
+        s.add_all(
+            [
+                Medication(
+                    inn_name="Amoxicillin", brand_name="Clamoxyl", form="tablet", strength="500mg"
+                ),
+                Medication(
+                    inn_name="Paracetamol", brand_name="Doliprane", form="tablet", strength="1g"
+                ),
+            ]
+        )
         s.commit()
 
     by_inn = MedicationController.search("amox")

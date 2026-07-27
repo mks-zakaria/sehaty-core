@@ -28,6 +28,7 @@ from sqlalchemy import func, select
 from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyValidationError
+from sehaty.core.places import match_display_names
 
 _DEFAULT_LIMIT = 20
 _MAX_LIMIT = 100
@@ -41,6 +42,7 @@ class DirectoryRow(DomainModel):
     full_name: str
     photo_url: str | None
     city: str | None
+    district: str | None
     consultation_fee: float | None
     avg_stars: float
     review_count: int
@@ -59,6 +61,8 @@ class DoctorDirectoryController:
     def list_directory(
         specialty: str | None = None,
         query: str | None = None,
+        city: str | None = None,
+        district: str | None = None,
         sort: str = "rating",
         limit: int = _DEFAULT_LIMIT,
         offset: int = 0,
@@ -66,7 +70,17 @@ class DoctorDirectoryController:
         """Browse VERIFIED, active doctors by specialty and rating (no geo).
 
         ``specialty`` is an optional specialty *slug* that narrows the listing to
-        doctors carrying that specialty. ``sort`` is one of:
+        doctors carrying that specialty.
+
+        ``city`` and ``district`` are place *slugs* (``"casablanca"``,
+        ``"maarif"``) as they appear in the public URL. They are resolved back to
+        the display spellings actually stored — matching every variant, so a
+        ``city`` recorded as both "Casablanca" and "casablanca" browses as one
+        page. A slug that matches nothing yields an empty page rather than an
+        error: an unknown city is a 404 concern for the route, not a validation
+        failure here.
+
+        ``sort`` is one of:
 
         * ``"rating"`` (default) — ``avg_stars`` desc (review-less doctors, whose
           score coalesces to 0, sort last), then ``review_count`` desc;
@@ -98,6 +112,7 @@ class DoctorDirectoryController:
                 DoctorProfile.full_name,
                 DoctorProfile.photo_url,
                 DoctorProfile.city,
+                DoctorProfile.district,
                 DoctorProfile.consultation_fee,
                 avg_stars,
                 review_count,
@@ -149,11 +164,22 @@ class DoctorDirectoryController:
         else:  # "name"
             stmt = stmt.order_by(DoctorProfile.full_name.asc(), DoctorProfile.user_id.asc())
 
-        stmt = stmt.limit(limit).offset(offset)
-
         with get_session() as session:
+            # Place filters resolve slug -> stored spellings, which needs the DB;
+            # applied before paging so `total` reflects them.
+            for column, slug in ((DoctorProfile.city, city), (DoctorProfile.district, district)):
+                if not (slug and slug.strip()):
+                    continue
+                stored = session.execute(select(column).distinct()).scalars().all()
+                matches = match_display_names(slug.strip(), list(stored))
+                if not matches:
+                    # Nothing stored under that slug — an empty page, not an error.
+                    return DirectoryPage(total=0, doctors=[])
+                stmt = stmt.where(column.in_(matches))
+                count_stmt = count_stmt.where(column.in_(matches))
+
             total = int(session.execute(count_stmt).scalar_one())
-            rows = session.execute(stmt).all()
+            rows = session.execute(stmt.limit(limit).offset(offset)).all()
             specialties_by_doctor = _resolve_specialties(session, [row.user_id for row in rows])
 
         doctors = [
@@ -162,6 +188,7 @@ class DoctorDirectoryController:
                 full_name=row.full_name,
                 photo_url=row.photo_url,
                 city=row.city,
+                district=row.district,
                 consultation_fee=row.consultation_fee,
                 avg_stars=float(row.avg_stars),
                 review_count=int(row.review_count),

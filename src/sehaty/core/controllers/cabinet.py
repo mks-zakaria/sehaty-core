@@ -115,14 +115,18 @@ class CabinetController:
     def current_session(cabinet_id: int) -> CabinetSessionRow | None:
         """The cabinet's currently-open session, or ``None`` when nobody is online."""
         with get_session() as session:
-            cabinet_session = session.execute(
-                select(CabinetSession)
-                .where(
-                    CabinetSession.cabinet_id == cabinet_id,
-                    CabinetSession.is_open.is_(True),
+            cabinet_session = (
+                session.execute(
+                    select(CabinetSession)
+                    .where(
+                        CabinetSession.cabinet_id == cabinet_id,
+                        CabinetSession.is_open.is_(True),
+                    )
+                    .order_by(CabinetSession.opened_at.desc())
                 )
-                .order_by(CabinetSession.opened_at.desc())
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             return (
                 CabinetSessionRow.model_validate(cabinet_session)
                 if cabinet_session is not None
@@ -174,18 +178,18 @@ class CabinetController:
             cabinet.waiting_room_count = count
 
             # The doctor is "present" iff a session is open at this cabinet.
-            online = session.execute(
-                select(CabinetSession.id).where(
-                    CabinetSession.cabinet_id == cabinet_id,
-                    CabinetSession.is_open.is_(True),
-                )
-            ).first() is not None
+            online = (
+                session.execute(
+                    select(CabinetSession.id).where(
+                        CabinetSession.cabinet_id == cabinet_id,
+                        CabinetSession.is_open.is_(True),
+                    )
+                ).first()
+                is not None
+            )
 
             should_alert = (
-                threshold is not None
-                and count >= threshold
-                and previous < threshold
-                and not online
+                threshold is not None and count >= threshold and previous < threshold and not online
             )
             owner_id = cabinet.owner_doctor_id
             cabinet_name = cabinet.name
@@ -218,15 +222,19 @@ class CabinetController:
         without needing to know the cabinet id.
         """
         with get_session() as session:
-            cabinet_session = session.execute(
-                select(CabinetSession)
-                .join(Cabinet, CabinetSession.cabinet_id == Cabinet.id)
-                .where(
-                    Cabinet.owner_doctor_id == owner_doctor_id,
-                    CabinetSession.is_open.is_(True),
+            cabinet_session = (
+                session.execute(
+                    select(CabinetSession)
+                    .join(Cabinet, CabinetSession.cabinet_id == Cabinet.id)
+                    .where(
+                        Cabinet.owner_doctor_id == owner_doctor_id,
+                        CabinetSession.is_open.is_(True),
+                    )
+                    .order_by(CabinetSession.opened_at.desc())
                 )
-                .order_by(CabinetSession.opened_at.desc())
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             return (
                 CabinetSessionRow.model_validate(cabinet_session)
                 if cabinet_session is not None
