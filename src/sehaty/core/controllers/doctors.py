@@ -31,6 +31,10 @@ from sehaty.db import (
 from sqlalchemy import cast, delete, func, select
 
 from sehaty.core._dto import DomainModel
+from sehaty.core.controllers.landing_config import (
+    LandingConfig,
+    LandingConfigController,
+)
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 from sehaty.core.services import doctors as doctor_service
@@ -153,6 +157,10 @@ class DoctorView(DomainModel):
     opening_hours: list[OpeningHours]
     insurances: list[str]
     tiers_payant: bool
+    # How this doctor's page is built: which specialty template, and their own
+    # content when they are on the paid tier. Resolved server-side so the
+    # landing app never has to know the specialty->template mapping.
+    landing: LandingConfig
     specialties: list[SpecialtyRef]
 
 
@@ -402,6 +410,7 @@ class DoctorController:
             ],
             insurances=list(row.insurances or []),
             tiers_payant=bool(row.tiers_payant),
+            landing=LandingConfigController.for_doctor(row.user_id),
             specialties=[
                 SpecialtyRef(
                     slug=s.slug,
