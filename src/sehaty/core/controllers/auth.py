@@ -104,9 +104,7 @@ class AuthController:
             return MeView.model_validate(user)
 
     @staticmethod
-    def register_pharmacy(
-        *, email: str, password: str, phone: str | None = None
-    ) -> MeView:
+    def register_pharmacy(*, email: str, password: str, phone: str | None = None) -> MeView:
         """Create a PHARMACY ``User`` (no profile) and return its :class:`MeView`."""
         if not email.strip() or not password:
             raise SehatyValidationError("email and password are required")

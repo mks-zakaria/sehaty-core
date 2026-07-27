@@ -105,7 +105,11 @@ def test_charge_with_down_payment_and_instalments(db):
     patient = _seed_register(db, doctor)
 
     charge = PatientLedgerController.add_charge(
-        doctor, patient, created_by=doctor, label="Braces", total_amount=8000,
+        doctor,
+        patient,
+        created_by=doctor,
+        label="Braces",
+        total_amount=8000,
         initial_payment=3000,
     )
     assert charge.paid_amount == 3000
@@ -138,7 +142,11 @@ def test_validation_guards(db):
         )
     with pytest.raises(SehatyValidationError):
         PatientLedgerController.add_charge(
-            doctor, patient, created_by=doctor, label="X", total_amount=100,
+            doctor,
+            patient,
+            created_by=doctor,
+            label="X",
+            total_amount=100,
             initial_payment=200,
         )
 
@@ -147,16 +155,17 @@ def test_validation_guards(db):
     )
     with pytest.raises(SehatyValidationError):
         PatientLedgerController.add_payment(
-            doctor, charge.id, created_by=doctor, amount=500  # exceeds balance
+            doctor,
+            charge.id,
+            created_by=doctor,
+            amount=500,  # exceeds balance
         )
     with pytest.raises(SehatyValidationError):
         PatientLedgerController.add_payment(
             doctor, charge.id, created_by=doctor, amount=100, method="BITCOIN"
         )
     with pytest.raises(SehatyValidationError):
-        PatientLedgerController.add_payment(
-            doctor, charge.id, created_by=doctor, amount=-5
-        )
+        PatientLedgerController.add_payment(doctor, charge.id, created_by=doctor, amount=-5)
 
 
 def test_doctor_scoping(db):
@@ -186,11 +195,17 @@ def test_payment_correction_and_charge_delete(db):
         doctor, patient, created_by=doctor, label="Braces", total_amount=8000
     )
     charge = PatientLedgerController.add_payment(
-        doctor, charge.id, created_by=doctor, amount=1000,
+        doctor,
+        charge.id,
+        created_by=doctor,
+        amount=1000,
         paid_at=datetime(2026, 7, 1, tzinfo=UTC),
     )
     wrong = PatientLedgerController.add_payment(
-        doctor, charge.id, created_by=doctor, amount=999,
+        doctor,
+        charge.id,
+        created_by=doctor,
+        amount=999,
         paid_at=datetime(2026, 7, 2, tzinfo=UTC),
     )
     fixed = PatientLedgerController.delete_payment(
@@ -220,13 +235,21 @@ def test_debtors_rollup(db):
     PatientLedgerController.add_payment(doctor, c.id, created_by=doctor, amount=500)
 
     PatientLedgerController.add_charge(
-        doctor, small, created_by=doctor, label="Cleaning", total_amount=400,
+        doctor,
+        small,
+        created_by=doctor,
+        label="Cleaning",
+        total_amount=400,
         initial_payment=100,
     )
     # Two charges + two payments for one patient: the per-charge subquery must
     # not double-count either side.
     b1 = PatientLedgerController.add_charge(
-        doctor, big, created_by=doctor, label="Braces", total_amount=8000,
+        doctor,
+        big,
+        created_by=doctor,
+        label="Braces",
+        total_amount=8000,
         initial_payment=2000,
     )
     PatientLedgerController.add_payment(doctor, b1.id, created_by=doctor, amount=1000)
@@ -256,12 +279,15 @@ def test_my_debts_across_doctors(db):
     # A different patient's charge that must NOT leak into the summary.
     other = _seed_register(db, d1, full_name="Someone else")
 
-    c1 = PatientLedgerController.add_charge(d1, reg1, created_by=d1, label="Braces",
-                                            total_amount=8000, initial_payment=3000)
-    PatientLedgerController.add_charge(d2, reg2, created_by=d2, label="Cleaning",
-                                       total_amount=400, initial_payment=400)  # settled
-    PatientLedgerController.add_charge(d1, other, created_by=d1, label="Root canal",
-                                       total_amount=1500)
+    c1 = PatientLedgerController.add_charge(
+        d1, reg1, created_by=d1, label="Braces", total_amount=8000, initial_payment=3000
+    )
+    PatientLedgerController.add_charge(
+        d2, reg2, created_by=d2, label="Cleaning", total_amount=400, initial_payment=400
+    )  # settled
+    PatientLedgerController.add_charge(
+        d1, other, created_by=d1, label="Root canal", total_amount=1500
+    )
 
     summary = PatientLedgerController.my_debts(app_patient)
     # Two charges belong to this patient (the "other" one is excluded).

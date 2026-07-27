@@ -315,9 +315,7 @@ class PharmacyController:
         like = f"%{q}%"
         with get_session() as session:
             rows = session.execute(
-                select(
-                    Medication.id, Medication.inn_name, Medication.brand_name, Medication.form
-                )
+                select(Medication.id, Medication.inn_name, Medication.brand_name, Medication.form)
                 .where(Medication.inn_name.ilike(like) | Medication.brand_name.ilike(like))
                 .order_by(Medication.inn_name)
                 .limit(limit)

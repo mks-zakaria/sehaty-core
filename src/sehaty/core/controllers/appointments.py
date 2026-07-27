@@ -145,9 +145,7 @@ PATIENT_TRANSITIONS: dict[AppointmentStatus, set[AppointmentStatus]] = {
 }
 
 
-def _load_for_acting_doctor(
-    session: Session, appointment_id: int, doctor_id: int
-) -> Appointment:
+def _load_for_acting_doctor(session: Session, appointment_id: int, doctor_id: int) -> Appointment:
     """Load an appointment and assert ``doctor_id`` is its session's acting doctor.
 
     Raises ``SehatyNotFoundError`` if the appointment is gone, ``SehatyConflictError``
@@ -545,9 +543,7 @@ class AppointmentController:
 
             # Cap first (excluding the appointment being moved), so a full target
             # day surfaces the clear "day is full" message before find_slot_end.
-            if daily_cap_reached(
-                session, doctor_id, new_start_at, exclude_appointment_id=appt.id
-            ):
+            if daily_cap_reached(session, doctor_id, new_start_at, exclude_appointment_id=appt.id):
                 raise SehatyConflictError("the doctor is fully booked for that day")
             new_end_at = find_slot_end(session, doctor_id, new_start_at)
             if new_end_at is None:

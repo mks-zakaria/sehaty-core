@@ -13,7 +13,10 @@ import pytest
 from sehaty.db import (
     Availability,
     DoctorProfile,
+    Plan,
     Specialty,
+    Subscription,
+    SubscriptionStatus,
     User,
     UserRole,
     VerificationStatus,
@@ -43,6 +46,27 @@ def _make_patient(session: Session, email: str) -> int:
     session.add(user)
     session.commit()
     return user.id
+
+
+def _subscribe(session: Session, user_id: int) -> None:
+    """Give a doctor a live subscription so the booking engine is switched on.
+
+    Slot generation is gated on entitlement: a doctor with no subscription keeps
+    their public page but has no bookable agenda.
+    """
+    plan = Plan(code=f"plan-{user_id}", name="Basic", price_month=199.0, currency="MAD")
+    session.add(plan)
+    session.flush()
+    session.add(
+        Subscription(
+            doctor_id=user_id,
+            plan_id=plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=datetime(2026, 7, 1, tzinfo=UTC),
+            current_period_end=datetime(2027, 7, 1, tzinfo=UTC),
+        )
+    )
+    session.commit()
 
 
 def _verify(session: Session, user_id: int) -> None:
@@ -182,6 +206,7 @@ def test_get_public_slots_returns_slots_for_verified(pg_session: Session) -> Non
     uid = _make_doctor(pg_session, "slots@clinic.ma")
     slug = DoctorController.upsert_profile(uid, full_name="Dr Slots")
     _verify(pg_session, uid)
+    _subscribe(pg_session, uid)
     # Monday 09:00-11:00, 30-min slots -> 4 bookable slots.
     pg_session.add(
         Availability(

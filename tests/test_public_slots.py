@@ -15,9 +15,18 @@ Covers the verified→slots happy path plus the not-found guard for a PENDING
 from datetime import UTC, date, datetime, time
 
 import pytest
-from sehaty.db import Appointment, Availability, AvailabilityException, User, UserRole
+from sehaty.db import (
+    Appointment,
+    Availability,
+    AvailabilityException,
+    Plan,
+    Subscription,
+    SubscriptionStatus,
+    User,
+    UserRole,
+)
 from sehaty.db.base import SehatyBase
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -58,6 +67,10 @@ def db() -> sessionmaker[Session]:
             Availability.__table__,
             AvailabilityException.__table__,
             Appointment.__table__,
+            # Slot generation now consults the subscription: a lapsed doctor
+            # keeps their page but loses the booking engine.
+            Plan.__table__,
+            Subscription.__table__,
         ],
     )
     with engine.begin() as conn:
@@ -108,11 +121,38 @@ def _add_window(factory: sessionmaker[Session], doctor_id: int) -> None:
         s.commit()
 
 
+def _subscribe(
+    factory: sessionmaker[Session],
+    doctor_id: int,
+    *,
+    status: SubscriptionStatus = SubscriptionStatus.ACTIVE,
+    period_end: datetime | None = None,
+) -> None:
+    """Give a doctor a subscription so the booking engine is switched on."""
+    with factory() as s:
+        plan = s.execute(select(Plan).where(Plan.code == "basic")).scalar_one_or_none()
+        if plan is None:
+            plan = Plan(code="basic", name="Basic", price_month=199.0, currency="MAD")
+            s.add(plan)
+            s.flush()
+        s.add(
+            Subscription(
+                doctor_id=doctor_id,
+                plan_id=plan.id,
+                status=status,
+                current_period_start=datetime(2026, 7, 1, tzinfo=UTC),
+                current_period_end=period_end or datetime(2026, 12, 31, tzinfo=UTC),
+            )
+        )
+        s.commit()
+
+
 def test_public_slots_for_verified_doctor(db: sessionmaker[Session]) -> None:
     doc = _seed_profile(
         db, email="v@clinic.ma", slug="dr-verified", license_no="L1", verification_status="VERIFIED"
     )
     _add_window(db, doc)
+    _subscribe(db, doc)
 
     slots = DoctorController.get_public_slots("dr-verified", _MONDAY, _MONDAY)
 
@@ -138,3 +178,44 @@ def test_public_slots_pending_not_found(db: sessionmaker[Session]) -> None:
 def test_public_slots_missing_slug_not_found(db: sessionmaker[Session]) -> None:
     with pytest.raises(SehatyNotFoundError):
         DoctorController.get_public_slots("nobody-here", _MONDAY, _MONDAY)
+
+
+def test_lapsed_subscription_yields_no_slots(db: sessionmaker[Session]) -> None:
+    """An unpaid doctor loses the agenda, not the page.
+
+    `get_public_slots` returns an empty list rather than raising: the profile is
+    still public and still callable, so a 404 here would be wrong — it would
+    also break the printed QR code in the waiting room.
+    """
+    doc = _seed_profile(
+        db,
+        email="lapsed@clinic.ma",
+        slug="dr-lapsed",
+        license_no="L9",
+        verification_status="VERIFIED",
+    )
+    _add_window(db, doc)
+    _subscribe(
+        db,
+        doc,
+        status=SubscriptionStatus.PAST_DUE,
+        # Well past the grace window.
+        period_end=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    assert DoctorController.get_public_slots("dr-lapsed", _MONDAY, _MONDAY) == []
+
+
+def test_doctor_who_never_subscribed_has_no_slots(db: sessionmaker[Session]) -> None:
+    # Most doctors on the platform are unclaimed imports; they never had a
+    # booking engine and must not appear to have one.
+    doc = _seed_profile(
+        db,
+        email="never@clinic.ma",
+        slug="dr-never",
+        license_no="L10",
+        verification_status="VERIFIED",
+    )
+    _add_window(db, doc)
+
+    assert DoctorController.get_public_slots("dr-never", _MONDAY, _MONDAY) == []
