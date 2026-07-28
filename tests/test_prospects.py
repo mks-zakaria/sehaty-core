@@ -61,9 +61,7 @@ def _doctor(
             address=address,
             claim_status=claim,
             source=source,
-            geopoint=(
-                WKTElement(f"POINT({_LNG} {_LAT})", srid=_SRID) if geo else None
-            ),
+            geopoint=(WKTElement(f"POINT({_LNG} {_LAT})", srid=_SRID) if geo else None),
         )
     )
     session.commit()
@@ -88,9 +86,7 @@ def _doctor(
 
 @pytest.mark.usefixtures("_pg_engine")
 class TestProspectBoard:
-    def test_an_imported_doctor_appears_as_an_unworked_prospect(
-        self, pg_session: Session
-    ) -> None:
+    def test_an_imported_doctor_appears_as_an_unworked_prospect(self, pg_session: Session) -> None:
         """The row the billing board cannot show: no subscription, no coords."""
         _doctor(
             pg_session,
@@ -110,9 +106,7 @@ class TestProspectBoard:
         assert board.onboarded == 0
         assert board.paying == 0
 
-    def test_maps_query_falls_back_to_the_written_address(
-        self, pg_session: Session
-    ) -> None:
+    def test_maps_query_falls_back_to_the_written_address(self, pg_session: Session) -> None:
         """Imported rows have no coordinates and still have to be driven to."""
         _doctor(
             pg_session,
@@ -127,9 +121,7 @@ class TestProspectBoard:
         assert row.lat is None
         assert row.maps_query == "Madinat Errahma, bloc U2, n°21, Errahma, Casablanca"
 
-    def test_maps_query_prefers_coordinates_when_present(
-        self, pg_session: Session
-    ) -> None:
+    def test_maps_query_prefers_coordinates_when_present(self, pg_session: Session) -> None:
         _doctor(
             pg_session,
             email="geo@c.ma",
@@ -189,9 +181,7 @@ class TestProspectBoard:
         assert len(ProspectController.board(plan=PLAN_LANDING, now=NOW).rows) == 3
         assert ProspectController.board(now=NOW).districts == ["Errahma", "Maârif"]
 
-    def test_ordered_by_district_so_the_list_reads_as_a_route(
-        self, pg_session: Session
-    ) -> None:
+    def test_ordered_by_district_so_the_list_reads_as_a_route(self, pg_session: Session) -> None:
         _doctor(pg_session, email="z@c.ma", slug="zed-maarif", district="Maârif")
         _doctor(pg_session, email="y@c.ma", slug="bee-errahma", district="Errahma")
         _doctor(pg_session, email="x@c.ma", slug="ay-errahma", district="Errahma")
