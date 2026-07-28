@@ -28,6 +28,7 @@ from sehaty.db import (
     DoctorLanding,
     DoctorProfile,
     DoctorSpecialty,
+    GeoPrecision,
     Specialty,
 )
 from sqlalchemy import cast, func, select
@@ -75,6 +76,10 @@ class ProspectRow(DomainModel):
     # address — imported rows have no coordinates and still need to be driven
     # to.
     maps_query: str
+    # True while the pin is a geocoded quartier centroid or missing entirely.
+    # The visit is the chance to fix it, so the list has to say so before the
+    # visit rather than after.
+    needs_pin: bool
 
 
 class ProspectBoard(DomainModel):
@@ -138,6 +143,7 @@ class ProspectController:
                 DoctorProfile.whatsapp,
                 DoctorProfile.claim_status,
                 DoctorProfile.source,
+                DoctorProfile.geo_precision,
                 # The column is geography; ST_X/ST_Y need a geometry cast.
                 func.ST_Y(cast(DoctorProfile.geopoint, Geometry)).label("lat"),
                 func.ST_X(cast(DoctorProfile.geopoint, Geometry)).label("lng"),
@@ -194,6 +200,7 @@ class ProspectController:
                     subscription_status=entitlement.status,
                     is_personalized=bool(record.is_personalized),
                     maps_query=_maps_query(record),
+                    needs_pin=record.geo_precision != GeoPrecision.EXACT,
                 )
             )
 

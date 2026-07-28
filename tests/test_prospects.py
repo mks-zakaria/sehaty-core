@@ -15,6 +15,7 @@ from geoalchemy2.elements import WKTElement
 from sehaty.db import (
     ClaimStatus,
     DoctorProfile,
+    GeoPrecision,
     Plan,
     ProfileSource,
     Subscription,
@@ -22,7 +23,7 @@ from sehaty.db import (
     User,
     UserRole,
 )
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from sehaty.core.controllers.prospects import (
@@ -62,6 +63,7 @@ def _doctor(
             claim_status=claim,
             source=source,
             geopoint=(WKTElement(f"POINT({_LNG} {_LAT})", srid=_SRID) if geo else None),
+            geo_precision=GeoPrecision.EXACT if geo else None,
         )
     )
     session.commit()
@@ -189,3 +191,36 @@ class TestProspectBoard:
         districts = [r.district for r in ProspectController.board(now=NOW).rows]
 
         assert districts == ["Errahma", "Errahma", "Maârif"]
+
+    def test_flags_who_still_needs_a_real_pin(self, pg_session: Session) -> None:
+        """The visit is the chance to fix a pin, so the list says so beforehand."""
+        _doctor(pg_session, email="nopin@c.ma", slug="dr-nopin", district="Errahma")
+        _doctor(
+            pg_session,
+            email="haspin@c.ma",
+            slug="dr-haspin",
+            district="Maârif",
+            geo=True,
+        )
+
+        rows = {r.slug: r for r in ProspectController.board(now=NOW).rows}
+
+        assert rows["dr-nopin"].needs_pin is True
+        assert rows["dr-haspin"].needs_pin is False
+
+    def test_a_geocoded_centroid_still_needs_a_pin(self, pg_session: Session) -> None:
+        """Having coordinates is not the same as having usable ones."""
+        uid = _doctor(
+            pg_session, email="approx@c.ma", slug="dr-approx", district="Errahma", geo=True
+        )
+        with pg_session.begin():
+            pg_session.execute(
+                update(DoctorProfile)
+                .where(DoctorProfile.user_id == uid)
+                .values(geo_precision=GeoPrecision.APPROXIMATE)
+            )
+
+        (row,) = ProspectController.board(now=NOW).rows
+
+        assert row.lat is not None
+        assert row.needs_pin is True

@@ -13,6 +13,7 @@ import pytest
 from sehaty.db import (
     Availability,
     DoctorProfile,
+    GeoPrecision,
     Plan,
     Specialty,
     Subscription,
@@ -244,3 +245,53 @@ def test_upsert_non_doctor_raises(pg_session: Session) -> None:
 
     with pytest.raises(SehatyNotFoundError):
         DoctorController.upsert_profile(pid, full_name="Not A Doctor")
+
+
+def test_dropping_a_pin_at_onboarding_upgrades_an_approximate_point(
+    pg_session: Session,
+) -> None:
+    """The whole reason onboarding captures a location.
+
+    An imported doctor is geocoded from a written address, which in these
+    quartiers can only ever resolve to the town — every cabinet in Errahma
+    lands on one shared pin. Standing outside the cabinet and dropping a real
+    one is the only way that becomes navigable, so the precision has to follow
+    the coordinates rather than stay stuck at APPROXIMATE.
+    """
+    uid = _make_doctor(pg_session, "pin@clinic.ma")
+    DoctorController.upsert_profile(
+        uid, full_name="Dr Imane Guerram", city="Casablanca", lat=33.5343, lng=-7.7322
+    )
+    with pg_session.begin():
+        pg_session.execute(
+            update(DoctorProfile)
+            .where(DoctorProfile.user_id == uid)
+            .values(geo_precision=GeoPrecision.APPROXIMATE)
+        )
+
+    DoctorController.patch_profile(uid, lat=_LAT, lng=_LNG)
+
+    view = DoctorController.get_for_admin(uid)
+    assert view.lat == pytest.approx(_LAT, abs=_EPS)
+    assert view.geo_precision == str(GeoPrecision.EXACT)
+
+
+def test_patching_other_fields_leaves_the_pin_and_its_precision_alone(
+    pg_session: Session,
+) -> None:
+    """Editing a phone number must not silently promote a geocoded centroid."""
+    uid = _make_doctor(pg_session, "nopin@clinic.ma")
+    DoctorController.upsert_profile(
+        uid, full_name="Dr Sara Bentass", city="Casablanca", lat=33.5343, lng=-7.7322
+    )
+    with pg_session.begin():
+        pg_session.execute(
+            update(DoctorProfile)
+            .where(DoctorProfile.user_id == uid)
+            .values(geo_precision=GeoPrecision.APPROXIMATE)
+        )
+
+    DoctorController.patch_profile(uid, phone_mobile="+212661000000")
+
+    view = DoctorController.get_for_admin(uid)
+    assert view.geo_precision == str(GeoPrecision.APPROXIMATE)
