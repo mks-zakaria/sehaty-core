@@ -16,6 +16,9 @@ from sehaty.db import (
     ConfirmationStatus,
     OutboundMessage,
     PatientProfile,
+    Plan,
+    Subscription,
+    SubscriptionStatus,
     User,
     UserRole,
     WaitlistEntry,
@@ -36,7 +39,7 @@ from sehaty.core.controllers.waitlist import (
     WaitlistController,
 )
 from sehaty.core.db import session as session_mod
-from sehaty.core.errors import SehatyConflictError
+from sehaty.core.errors import SehatyConflictError, SehatyValidationError
 
 _TABLES = [
     User.__table__,
@@ -46,9 +49,35 @@ _TABLES = [
     Appointment.__table__,
     OutboundMessage.__table__,
     WaitlistEntry.__table__,
+    # Joining a waitlist checks the doctor still serves slots at all.
+    Plan.__table__,
+    Subscription.__table__,
 ]
 
 NOW = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+
+
+def _subscribe(db: sessionmaker[Session], doctor_id: int) -> None:
+    """Give the doctor a live subscription.
+
+    Mirrors production, where accrediting a doctor opens a trial: without a
+    subscription row the entitlement check reads "not taking bookings" and the
+    waitlist refuses to queue anyone.
+    """
+    with db() as s:
+        plan = Plan(code="test", name="Test", price_month=199, is_active=True)
+        s.add(plan)
+        s.commit()
+        s.add(
+            Subscription(
+                doctor_id=doctor_id,
+                plan_id=plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                current_period_start=NOW - timedelta(days=1),
+                current_period_end=NOW + timedelta(days=30),
+            )
+        )
+        s.commit()
 
 
 @pytest.fixture
@@ -325,6 +354,7 @@ class TestDayViewScoring:
 class TestWaitlist:
     def _pair(self, db: sessionmaker[Session]) -> tuple[int, int, int]:
         doctor = _user(db, "doc@c.ma", UserRole.DOCTOR)
+        _subscribe(db, doctor)
         booked = _user(db, "booked@c.ma", UserRole.PATIENT, phone="+212661111111")
         waiting = _user(db, "waiting@c.ma", UserRole.PATIENT, phone="+212662222222")
         return doctor, booked, waiting
@@ -335,6 +365,18 @@ class TestWaitlist:
 
         queue = WaitlistController.queue(doctor)
         assert [row.entry_id for row in queue] == [entry_id]
+
+    def test_cannot_queue_for_a_doctor_who_serves_no_slots(self, db: sessionmaker[Session]) -> None:
+        """A lapsed doctor returns zero slots, so a queue for them never moves.
+
+        Better a clear refusal at join time than a patient waiting indefinitely
+        for an offer the system is structurally unable to make.
+        """
+        lapsed = _user(db, "lapsed@c.ma", UserRole.DOCTOR)  # no subscription row
+        patient = _user(db, "hopeful@c.ma", UserRole.PATIENT)
+
+        with pytest.raises(SehatyValidationError):
+            WaitlistController.join(lapsed, patient)
 
     def test_joining_twice_is_a_conflict_not_a_duplicate(self, db: sessionmaker[Session]) -> None:
         # Duplicate entries would quietly double someone's odds.
