@@ -97,9 +97,10 @@ class WaitlistController:
         """
         if earliest_at and latest_at and earliest_at >= latest_at:
             raise SehatyValidationError("earliest_at must precede latest_at")
-        # A doctor whose subscription lapsed serves no slots at all, so a queue
-        # for them is a queue that can never move. Refusing here beats letting
-        # someone wait indefinitely for an offer the system cannot make.
+        # The waitlist is part of the booking engine, which is what a
+        # subscription buys — the public page stays free either way. A lapsed
+        # doctor also serves no slots publicly, so a queue nobody can see the
+        # front of is a poor thing to let someone join.
         if not booking_enabled(doctor_id):
             raise SehatyValidationError("this doctor is not taking online bookings")
 
