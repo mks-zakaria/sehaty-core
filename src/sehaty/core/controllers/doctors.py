@@ -23,6 +23,7 @@ from geoalchemy2.elements import WKTElement
 from sehaty.db import (
     DoctorProfile,
     DoctorSpecialty,
+    GeoPrecision,
     Specialty,
     User,
     UserRole,
@@ -405,6 +406,14 @@ class DoctorController:
 
             if lat is not None and lng is not None:
                 profile.geopoint = WKTElement(f"POINT({lng} {lat})", srid=_SRID)
+                # Coordinates arriving through here were put there by a person —
+                # standing in the cabinet during onboarding, or reading them off
+                # a map. That is the only way a doctor gets a pin worth
+                # navigating to, since geocoding their written address can only
+                # ever return the quartier. The geocoder writes the model
+                # directly and never comes through this path, so there is no
+                # risk of a coarse point being promoted by mistake.
+                profile.geo_precision = GeoPrecision.EXACT
             if specialty_slugs is not None:
                 DoctorController._replace_specialties(session, doctor_id, list(specialty_slugs))
 
