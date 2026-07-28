@@ -11,8 +11,8 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 from sehaty.db import (
-    ClaimStatus,
     Availability,
+    ClaimStatus,
     DoctorProfile,
     GeoPrecision,
     Plan,
