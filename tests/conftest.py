@@ -58,10 +58,15 @@ def pg_session(_pg_engine) -> Session:
     Truncates the doctor/user/specialty tables (CASCADE) before each test so
     controllers — which open their own sessions via ``get_session()`` — see a
     blank slate, then yields a raw session for direct setup and assertions.
+
+    ``plans`` is truncated explicitly: it has no foreign key to ``users``, so
+    CASCADE never reaches it, and a plan code written by one run collided with
+    the next. That only ever bit locally — CI builds a fresh database per run,
+    so the suite was green there while failing on a second local run.
     """
     factory = sessionmaker(bind=_pg_engine, expire_on_commit=False)
     with factory() as cleaner:
-        cleaner.execute(text("TRUNCATE users, specialties RESTART IDENTITY CASCADE"))
+        cleaner.execute(text("TRUNCATE users, specialties, plans RESTART IDENTITY CASCADE"))
         cleaner.commit()
 
     session_mod.set_session_factory(factory)
