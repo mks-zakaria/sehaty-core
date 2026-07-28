@@ -396,3 +396,68 @@ def test_mirroring_twice_does_not_double_the_agenda(pg_session: Session) -> None
     mirror_opening_hours(uid)
     assert mirror_opening_hours(uid) == 1
     assert len(AvailabilityController.list(uid)) == 1
+
+
+def test_a_listed_page_is_public_but_never_badged(pg_session: Session) -> None:
+    """The rule: publishing a directory entry is not vouching for a licence.
+
+    The importer marked every page VERIFIED because the public read refused to
+    render anything else, which put a "Vérifié" badge on thousands of doctors
+    nobody had spoken to. LISTED renders identically and carries no claim.
+    """
+    uid = _make_doctor(pg_session, "listed@clinic.ma")
+    slug = DoctorController.upsert_profile(
+        uid, full_name="Dr Listed", city="Casablanca", lat=_LAT, lng=_LNG
+    )
+    with pg_session.begin():
+        pg_session.execute(
+            update(DoctorProfile)
+            .where(DoctorProfile.user_id == uid)
+            .values(verification_status=VerificationStatus.LISTED)
+        )
+
+    view = DoctorController.get_by_slug(slug)
+
+    # Visible to a patient …
+    assert view.slug == slug
+    # … and honest about what we actually know.
+    assert view.verification_status == str(VerificationStatus.LISTED)
+    assert view.verification_status != str(VerificationStatus.VERIFIED)
+
+
+def test_accreditation_is_what_grants_the_badge(pg_session: Session) -> None:
+    """Only a human deciding this professional is who they say."""
+    uid = _make_doctor(pg_session, "accredit@clinic.ma")
+    slug = DoctorController.upsert_profile(
+        uid, full_name="Dr Accredited", city="Casablanca", lat=_LAT, lng=_LNG
+    )
+    with pg_session.begin():
+        pg_session.execute(
+            update(DoctorProfile)
+            .where(DoctorProfile.user_id == uid)
+            .values(verification_status=VerificationStatus.LISTED)
+        )
+    assert DoctorController.get_by_slug(slug).verification_status == str(VerificationStatus.LISTED)
+
+    _verify(pg_session, uid)
+
+    assert DoctorController.get_by_slug(slug).verification_status == str(
+        VerificationStatus.VERIFIED
+    )
+
+
+def test_a_pending_page_is_still_not_public(pg_session: Session) -> None:
+    """Widening visibility to LISTED must not have opened it to everything."""
+    uid = _make_doctor(pg_session, "pending@clinic.ma")
+    slug = DoctorController.upsert_profile(
+        uid, full_name="Dr Pending", city="Casablanca", lat=_LAT, lng=_LNG
+    )
+    with pg_session.begin():
+        pg_session.execute(
+            update(DoctorProfile)
+            .where(DoctorProfile.user_id == uid)
+            .values(verification_status=VerificationStatus.PENDING)
+        )
+
+    with pytest.raises(SehatyNotFoundError):
+        DoctorController.get_by_slug(slug)
