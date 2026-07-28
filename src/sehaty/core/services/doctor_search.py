@@ -86,7 +86,7 @@ def search_doctors(
         .where(
             User.is_active.is_(True),
             Specialty.slug == specialty_slug,
-            DoctorProfile.verification_status == VerificationStatus.VERIFIED,
+            DoctorProfile.verification_status.in_(VerificationStatus.publicly_visible()),
             func.ST_DWithin(DoctorProfile.geopoint, point, radius_m),
         )
         .order_by(DoctorProfile.geopoint.op("<->")(point))

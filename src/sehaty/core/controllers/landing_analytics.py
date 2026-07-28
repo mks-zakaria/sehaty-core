@@ -74,7 +74,7 @@ class LandingAnalyticsController:
                 .where(
                     DoctorProfile.slug == doctor_slug,
                     User.is_active.is_(True),
-                    DoctorProfile.verification_status == VerificationStatus.VERIFIED,
+                    DoctorProfile.verification_status.in_(VerificationStatus.publicly_visible()),
                 )
             ).scalar_one_or_none()
             if doctor_id is None:

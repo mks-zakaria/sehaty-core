@@ -121,7 +121,7 @@ class DoctorDirectoryController:
             .outerjoin(ReputationScore, ReputationScore.user_id == DoctorProfile.user_id)
             .where(
                 User.is_active.is_(True),
-                DoctorProfile.verification_status == VerificationStatus.VERIFIED,
+                DoctorProfile.verification_status.in_(VerificationStatus.publicly_visible()),
             )
         )
 
@@ -132,7 +132,7 @@ class DoctorDirectoryController:
             .join(User, User.id == DoctorProfile.user_id)
             .where(
                 User.is_active.is_(True),
-                DoctorProfile.verification_status == VerificationStatus.VERIFIED,
+                DoctorProfile.verification_status.in_(VerificationStatus.publicly_visible()),
             )
         )
 

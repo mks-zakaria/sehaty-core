@@ -44,6 +44,10 @@ from sehaty.core.services.slots import available_slots
 
 _MAX_LIMIT = 100
 _SRID = 4326
+# A page is public when it is LISTED or VERIFIED. Only VERIFIED earns the badge:
+# publishing a directory entry and vouching for a licence are different acts,
+# and conflating them put a badge on thousands of doctors nobody had spoken to.
+_PUBLIC = VerificationStatus.publicly_visible()
 
 
 class SpecialtyRef(DomainModel):
@@ -191,7 +195,7 @@ class DoctorController:
             .join(User, User.id == DoctorProfile.user_id)
             .where(
                 User.is_active.is_(True),
-                DoctorProfile.verification_status == VerificationStatus.VERIFIED,
+                DoctorProfile.verification_status.in_(_PUBLIC),
             )
             .order_by(DoctorProfile.slug.asc())
         )
@@ -473,9 +477,7 @@ class DoctorController:
 
         with get_session() as session:
             row = session.execute(stmt).one_or_none()
-            if row is None or (
-                require_verified and row.verification_status != VerificationStatus.VERIFIED
-            ):
+            if row is None or (require_verified and row.verification_status not in _PUBLIC):
                 raise SehatyNotFoundError(f"no verified doctor for slug {slug!r}")
 
             specs = session.execute(
@@ -551,7 +553,7 @@ class DoctorController:
 
         with get_session() as session:
             row = session.execute(stmt).one_or_none()
-            if row is None or row.verification_status != VerificationStatus.VERIFIED:
+            if row is None or row.verification_status not in _PUBLIC:
                 raise SehatyNotFoundError(f"no verified doctor for slug {slug!r}")
             if not booking_enabled(row.user_id):
                 return []
@@ -568,6 +570,7 @@ class DoctorController:
             .scalars()
             .all()
         )
+
         if base not in taken:
             return base
         n = 2

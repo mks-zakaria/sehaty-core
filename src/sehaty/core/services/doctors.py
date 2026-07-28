@@ -17,7 +17,7 @@ def search_doctors(
     Only VERIFIED doctors are surfaced in the marketplace.
     """
     stmt = select(DoctorProfile).where(
-        DoctorProfile.verification_status == VerificationStatus.VERIFIED
+        DoctorProfile.verification_status.in_(VerificationStatus.publicly_visible())
     )
     if city:
         stmt = stmt.where(DoctorProfile.city == city)
