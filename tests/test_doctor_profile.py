@@ -11,6 +11,7 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 from sehaty.db import (
+    ClaimStatus,
     Availability,
     DoctorProfile,
     GeoPrecision,
@@ -25,8 +26,14 @@ from sehaty.db import (
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from sehaty.core.controllers.claims import grant_access
 from sehaty.core.controllers.doctors import DoctorController
-from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
+from sehaty.core.errors import (
+    SehatyConflictError,
+    SehatyNotFoundError,
+    SehatyValidationError,
+)
+from sehaty.core.security import verify_password
 
 # Casablanca-ish coordinates (lon/lat, WGS84).
 _LAT = 33.5731104
@@ -295,3 +302,55 @@ def test_patching_other_fields_leaves_the_pin_and_its_precision_alone(
 
     view = DoctorController.get_for_admin(uid)
     assert view.geo_precision == str(GeoPrecision.APPROXIMATE)
+
+
+def test_granting_access_keeps_the_page_the_plaque_points_at(pg_session: Session) -> None:
+    """The onboarding visit's last step, and the one that had no path.
+
+    An imported doctor has a placeholder address and no password. Registering
+    afresh would mint a second profile under a different slug, leaving the
+    printed QR aimed at the abandoned one — so access has to attach to the
+    profile that already exists.
+    """
+    uid = _make_doctor(pg_session, "import-placeholder@import.invalid")
+    slug = DoctorController.upsert_profile(uid, full_name="Dr Imane Guerram", city="Casablanca")
+    with pg_session.begin():
+        pg_session.execute(
+            update(DoctorProfile)
+            .where(DoctorProfile.user_id == uid)
+            .values(claim_status=ClaimStatus.UNCLAIMED)
+        )
+
+    grant = grant_access(uid, email="imane.guerram@gmail.com", password="cabinet-2026")
+
+    assert grant.slug == slug
+    assert grant.claim_status == str(ClaimStatus.CLAIMED)
+    with pg_session.begin():
+        user = pg_session.get(User, uid)
+        assert user.email == "imane.guerram@gmail.com"
+        assert verify_password("cabinet-2026", user.password_hash)
+
+
+def test_granting_access_refuses_an_address_someone_else_holds(pg_session: Session) -> None:
+    first = _make_doctor(pg_session, "taken@clinic.ma")
+    DoctorController.upsert_profile(first, full_name="Dr A", city="Casablanca")
+    second = _make_doctor(pg_session, "other@import.invalid")
+    DoctorController.upsert_profile(second, full_name="Dr B", city="Casablanca")
+
+    with pytest.raises(SehatyConflictError):
+        grant_access(second, email="taken@clinic.ma", password="cabinet-2026")
+
+
+def test_granting_access_refuses_a_delisted_page(pg_session: Session) -> None:
+    """A removal is a tombstone: it must not be reopened by selling to them."""
+    uid = _make_doctor(pg_session, "gone@import.invalid")
+    DoctorController.upsert_profile(uid, full_name="Dr Gone", city="Casablanca")
+    with pg_session.begin():
+        pg_session.execute(
+            update(DoctorProfile)
+            .where(DoctorProfile.user_id == uid)
+            .values(claim_status=ClaimStatus.REMOVAL_REQUESTED)
+        )
+
+    with pytest.raises(SehatyValidationError):
+        grant_access(uid, email="gone@gmail.com", password="cabinet-2026")
