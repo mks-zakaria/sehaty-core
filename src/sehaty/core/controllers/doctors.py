@@ -335,8 +335,97 @@ class DoctorController:
             return slug
 
     @staticmethod
+    def patch_profile(doctor_id: int, **fields: object) -> None:
+        """Partially update a doctor's profile — omitted fields are untouched.
+
+        ``upsert_profile`` is the doctor's own form, which always posts every
+        field and therefore replaces wholesale. Staff editing someone else's
+        profile at onboarding send only what they collected, so the same
+        semantics would silently wipe a bio they never saw.
+
+        Only whitelisted columns are writable: a caller cannot reach
+        ``verification_status``, ``claim_status`` or ``slug`` through here.
+        Those are separate, audited decisions.
+        """
+        writable = {
+            "full_name",
+            "bio",
+            "photo_url",
+            "address",
+            "city",
+            "district",
+            "consultation_fee",
+            "languages",
+            "timezone",
+            "phone_fixe",
+            "phone_mobile",
+            "whatsapp",
+            "opening_hours",
+            "insurances",
+            "tiers_payant",
+        }
+        unknown = set(fields) - writable - {"lat", "lng", "specialty_slugs"}
+        if unknown:
+            raise SehatyValidationError(f"not writable: {sorted(unknown)}")
+
+        if "timezone" in fields and fields["timezone"] is not None:
+            try:
+                ZoneInfo(str(fields["timezone"]))
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise SehatyValidationError(f"unknown timezone: {fields['timezone']!r}") from exc
+        if fields.get("opening_hours") is not None:
+            fields["opening_hours"] = _validate_opening_hours(fields["opening_hours"])  # type: ignore[arg-type]
+        if fields.get("insurances") is not None:
+            fields["insurances"] = list(
+                dict.fromkeys(
+                    s.strip().lower()
+                    for s in fields["insurances"]
+                    if s.strip()  # type: ignore[union-attr]
+                )
+            )
+
+        lat, lng = fields.pop("lat", None), fields.pop("lng", None)
+        specialty_slugs = fields.pop("specialty_slugs", None)
+
+        with get_session() as session:
+            profile = session.execute(
+                select(DoctorProfile).where(DoctorProfile.user_id == doctor_id)
+            ).scalar_one_or_none()
+            if profile is None:
+                raise SehatyNotFoundError(f"no doctor profile for user {doctor_id}")
+
+            for key, value in fields.items():
+                if value is not None:
+                    setattr(profile, key, value)
+
+            if lat is not None and lng is not None:
+                profile.geopoint = WKTElement(f"POINT({lng} {lat})", srid=_SRID)
+            if specialty_slugs is not None:
+                DoctorController._replace_specialties(session, doctor_id, list(specialty_slugs))
+
+    @staticmethod
+    def get_for_admin(doctor_id: int) -> DoctorView:
+        """The full profile by user id, regardless of verification status.
+
+        Staff need to read a PENDING doctor's page while setting it up, which
+        the public ``get_by_slug`` deliberately refuses to do.
+        """
+        with get_session() as session:
+            slug = session.execute(
+                select(DoctorProfile.slug).where(DoctorProfile.user_id == doctor_id)
+            ).scalar_one_or_none()
+        if slug is None:
+            raise SehatyNotFoundError(f"no doctor profile for user {doctor_id}")
+        return DoctorController._view_for_slug(slug)
+
+    @staticmethod
     def get_by_slug(slug: str) -> DoctorView:
-        """Return the public view of a VERIFIED doctor, else ``NotFound``.
+        """Return the public view of a VERIFIED doctor, else ``NotFound``."""
+        return DoctorController._view_for_slug(slug, require_verified=True)
+
+    @staticmethod
+    def _view_for_slug(slug: str, *, require_verified: bool = False) -> DoctorView:
+        """Build the doctor projection; the verified gate is the caller's choice.
 
         Only VERIFIED doctors are surfaced publicly: a PENDING/REJECTED (or
         missing) slug raises ``SehatyNotFoundError`` — we don't leak the
@@ -369,7 +458,9 @@ class DoctorController:
 
         with get_session() as session:
             row = session.execute(stmt).one_or_none()
-            if row is None or row.verification_status != VerificationStatus.VERIFIED:
+            if row is None or (
+                require_verified and row.verification_status != VerificationStatus.VERIFIED
+            ):
                 raise SehatyNotFoundError(f"no verified doctor for slug {slug!r}")
 
             specs = session.execute(

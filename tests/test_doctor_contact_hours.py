@@ -22,7 +22,7 @@ from sqlalchemy.pool import StaticPool
 
 from sehaty.core.controllers.doctors import DoctorController
 from sehaty.core.db import session as session_mod
-from sehaty.core.errors import SehatyValidationError
+from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 
 
 @compiles(Geography, "sqlite")
@@ -223,3 +223,59 @@ def test_update_none_retains_tiers_payant(db: sessionmaker[Session]) -> None:
     DoctorController.upsert_profile(uid, full_name="Dr TP", bio="updated")
 
     assert _stored(db, uid, DoctorProfile.tiers_payant) is True
+
+
+class TestAdminPatchProfile:
+    """Staff editing someone else's profile send only what they collected.
+
+    `upsert_profile` is the doctor's own form and replaces wholesale; using it
+    from the console would wipe a bio the operator never saw. These pin the
+    partial semantics and the write whitelist.
+    """
+
+    def _doctor(self, factory: sessionmaker[Session]) -> int:
+        uid = _make_doctor(factory, "patch@clinic.ma")
+        DoctorController.upsert_profile(
+            uid,
+            full_name="Dr Patch",
+            bio="Cardiologue depuis 2010",
+            address="12 Bd Zerktouni",
+            city="Casablanca",
+            consultation_fee=400.0,
+        )
+        return uid
+
+    def test_sets_only_the_fields_given(self, db: sessionmaker[Session]) -> None:
+        uid = self._doctor(db)
+
+        DoctorController.patch_profile(uid, opening_hours=_MON_TUE)
+
+        assert _stored(db, uid, DoctorProfile.opening_hours) == _MON_TUE
+        # Everything the operator did not touch survives.
+        assert _stored(db, uid, DoctorProfile.bio) == "Cardiologue depuis 2010"
+        assert _stored(db, uid, DoctorProfile.address) == "12 Bd Zerktouni"
+        assert _stored(db, uid, DoctorProfile.consultation_fee) == 400.0
+
+    def test_normalizes_insurances_like_the_doctor_form(self, db: sessionmaker[Session]) -> None:
+        uid = self._doctor(db)
+        DoctorController.patch_profile(uid, insurances=["CNSS", " cnops ", "CNSS"])
+        assert _stored(db, uid, DoctorProfile.insurances) == ["cnss", "cnops"]
+
+    def test_validates_opening_hours(self, db: sessionmaker[Session]) -> None:
+        uid = self._doctor(db)
+        with pytest.raises(SehatyValidationError):
+            DoctorController.patch_profile(
+                uid, opening_hours=[{"weekday": 9, "ranges": [["09:00", "10:00"]]}]
+            )
+
+    def test_refuses_to_write_protected_columns(self, db: sessionmaker[Session]) -> None:
+        # verification_status, claim_status and slug are separate, audited
+        # decisions — an onboarding form must not be able to reach them.
+        uid = self._doctor(db)
+        for field in ("verification_status", "claim_status", "slug", "license_no"):
+            with pytest.raises(SehatyValidationError):
+                DoctorController.patch_profile(uid, **{field: "x"})
+
+    def test_unknown_doctor_raises(self, db: sessionmaker[Session]) -> None:
+        with pytest.raises(SehatyNotFoundError):
+            DoctorController.patch_profile(999_999, city="Casablanca")
