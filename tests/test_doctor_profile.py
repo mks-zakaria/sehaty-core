@@ -26,6 +26,10 @@ from sehaty.db import (
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from sehaty.core.controllers.availability import (
+    AvailabilityController,
+    mirror_opening_hours,
+)
 from sehaty.core.controllers.claims import grant_access
 from sehaty.core.controllers.doctors import DoctorController
 from sehaty.core.errors import (
@@ -354,3 +358,41 @@ def test_granting_access_refuses_a_delisted_page(pg_session: Session) -> None:
 
     with pytest.raises(SehatyValidationError):
         grant_access(uid, email="gone@gmail.com", password="cabinet-2026")
+
+
+def test_opening_hours_become_a_bookable_agenda(pg_session: Session) -> None:
+    """The gap that makes a sold booking engine offer nothing.
+
+    opening_hours is what the page displays; availabilities is what generates
+    slots. A doctor states one set of hours and means both, so onboarding has to
+    copy them across — otherwise the agenda is empty and nobody finds out until
+    a patient tries to book.
+    """
+    uid = _make_doctor(pg_session, "hours@clinic.ma")
+    DoctorController.upsert_profile(uid, full_name="Dr Hours", city="Casablanca")
+    DoctorController.patch_profile(
+        uid,
+        opening_hours=[
+            {"weekday": 0, "ranges": [["09:00", "12:30"], ["15:00", "19:00"]]},
+            {"weekday": 5, "ranges": [["09:00", "13:00"]]},
+        ],
+    )
+
+    created = mirror_opening_hours(uid, slot_minutes=30)
+
+    assert created == 3
+    rows = AvailabilityController.list(uid)
+    assert sorted({r.weekday for r in rows}) == [0, 5]
+
+
+def test_mirroring_twice_does_not_double_the_agenda(pg_session: Session) -> None:
+    """An operator correcting hours in front of the doctor expects a fix."""
+    uid = _make_doctor(pg_session, "twice@clinic.ma")
+    DoctorController.upsert_profile(uid, full_name="Dr Twice", city="Casablanca")
+    DoctorController.patch_profile(
+        uid, opening_hours=[{"weekday": 1, "ranges": [["09:00", "12:00"]]}]
+    )
+
+    mirror_opening_hours(uid)
+    assert mirror_opening_hours(uid) == 1
+    assert len(AvailabilityController.list(uid)) == 1
