@@ -139,6 +139,11 @@ class DoctorView(DomainModel):
     district: str | None
     lat: float | None
     lng: float | None
+    # How far to trust lat/lng. "APPROXIMATE" means a quartier centroid from
+    # geocoding a written address — right neighbourhood, wrong door — so the
+    # page must not build turn-by-turn directions from it. None means the point
+    # predates the column and is treated as exact.
+    geo_precision: str | None
     consultation_fee: float | None
     languages: list[str]
     timezone: str
@@ -443,6 +448,7 @@ class DoctorController:
             DoctorProfile.district,
             func.ST_Y(cast(DoctorProfile.geopoint, Geometry)).label("lat"),
             func.ST_X(cast(DoctorProfile.geopoint, Geometry)).label("lng"),
+            DoctorProfile.geo_precision,
             DoctorProfile.consultation_fee,
             DoctorProfile.languages,
             DoctorProfile.timezone,
@@ -486,6 +492,7 @@ class DoctorController:
             district=row.district,
             lat=row.lat,
             lng=row.lng,
+            geo_precision=str(row.geo_precision) if row.geo_precision else None,
             consultation_fee=row.consultation_fee,
             languages=list(row.languages or []),
             timezone=row.timezone,
