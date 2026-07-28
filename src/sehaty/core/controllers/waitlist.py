@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from sehaty.db import (
     Appointment,
     AppointmentStatus,
+    DoctorProfile,
     PatientProfile,
     User,
     WaitlistEntry,
@@ -33,6 +34,7 @@ from sehaty.core.errors import (
     SehatyNotFoundError,
     SehatyValidationError,
 )
+from sehaty.core.services.entitlement import booking_enabled
 
 # How long a patient has to take an offered slot before it moves down the queue.
 OFFER_TTL_MINUTES = 120
@@ -61,6 +63,22 @@ class OfferResult(DomainModel):
     offered: bool
 
 
+class PatientWaitlistRow(DomainModel):
+    """One of the caller's own waitlist entries, with the offer if there is one."""
+
+    entry_id: int
+    doctor_id: int
+    doctor_name: str | None
+    doctor_slug: str | None
+    status: str
+    joined_at: datetime
+    # Set only while a slot is on the table. The patient cannot act without it,
+    # and without a read like this an offer is invisible to the person it is for.
+    offered_start_at: datetime | None
+    offered_end_at: datetime | None
+    offer_expires_at: datetime | None
+
+
 class WaitlistController:
     @staticmethod
     def join(
@@ -79,6 +97,11 @@ class WaitlistController:
         """
         if earliest_at and latest_at and earliest_at >= latest_at:
             raise SehatyValidationError("earliest_at must precede latest_at")
+        # A doctor whose subscription lapsed serves no slots at all, so a queue
+        # for them is a queue that can never move. Refusing here beats letting
+        # someone wait indefinitely for an offer the system cannot make.
+        if not booking_enabled(doctor_id):
+            raise SehatyValidationError("this doctor is not taking online bookings")
 
         with get_session() as session:
             existing = session.execute(
@@ -115,6 +138,62 @@ class WaitlistController:
             session.add(entry)
             session.flush()
             return int(entry.id)
+
+    @staticmethod
+    def for_patient(patient_id: int, *, now: datetime | None = None) -> list[PatientWaitlistRow]:
+        """The caller's own waitlist entries, newest offer first.
+
+        Without this an offered slot is invisible to the patient it was offered
+        to: the doctor's screen shows the offer went out, and the patient has
+        nowhere to see it. Offers are time-boxed, so the deadline is returned
+        alongside — a countdown the patient cannot see is not a deadline.
+        """
+        now = now or datetime.now(UTC)
+
+        with get_session() as session:
+            rows = session.execute(
+                select(
+                    WaitlistEntry.id,
+                    WaitlistEntry.doctor_id,
+                    WaitlistEntry.status,
+                    WaitlistEntry.joined_at,
+                    WaitlistEntry.offered_at,
+                    DoctorProfile.full_name,
+                    DoctorProfile.slug,
+                    Appointment.start_at,
+                    Appointment.end_at,
+                )
+                # Outer: a patient's own entry must never disappear from their
+                # list because the doctor row is missing. Better a nameless row
+                # they can still decline than a silently vanished offer.
+                .outerjoin(DoctorProfile, DoctorProfile.user_id == WaitlistEntry.doctor_id)
+                .outerjoin(Appointment, Appointment.id == WaitlistEntry.offered_appointment_id)
+                .where(
+                    WaitlistEntry.patient_id == patient_id,
+                    WaitlistEntry.status.in_([WaitlistStatus.WAITING, WaitlistStatus.OFFERED]),
+                )
+                .order_by(WaitlistEntry.offered_at.desc().nullslast())
+            ).all()
+
+        out: list[PatientWaitlistRow] = []
+        for row in rows:
+            offered_at = _as_utc(row.offered_at)
+            out.append(
+                PatientWaitlistRow(
+                    entry_id=row.id,
+                    doctor_id=row.doctor_id,
+                    doctor_name=row.full_name,
+                    doctor_slug=row.slug,
+                    status=str(row.status),
+                    joined_at=row.joined_at,
+                    offered_start_at=row.start_at,
+                    offered_end_at=row.end_at,
+                    offer_expires_at=(
+                        offered_at + timedelta(minutes=OFFER_TTL_MINUTES) if offered_at else None
+                    ),
+                )
+            )
+        return out
 
     @staticmethod
     def leave(entry_id: int, patient_id: int) -> None:
@@ -276,6 +355,13 @@ class WaitlistController:
         now = now or datetime.now(UTC)
         with get_session() as session:
             return _expire_offers(session, None, now)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Postgres returns aware datetimes, SQLite naive; normalize before arithmetic."""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)
 
 
 def _expire_offers(session, doctor_id: int | None, now: datetime) -> int:  # noqa: ANN001
