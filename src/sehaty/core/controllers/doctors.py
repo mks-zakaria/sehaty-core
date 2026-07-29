@@ -36,6 +36,7 @@ from sehaty.core.controllers.landing_config import (
     LandingConfig,
     LandingConfigController,
 )
+from sehaty.core.controllers.onboarding import clean_bio_i18n
 from sehaty.core.db.session import get_session
 from sehaty.core.errors import SehatyNotFoundError, SehatyValidationError
 from sehaty.core.services import doctors as doctor_service
@@ -138,6 +139,8 @@ class DoctorView(DomainModel):
     slug: str
     full_name: str
     bio: str | None
+    # Per-language presentation; falls back to `bio` for anything absent.
+    bio_i18n: dict
     photo_url: str | None
     address: str | None
     city: str | None
@@ -373,6 +376,7 @@ class DoctorController:
             "opening_hours",
             "insurances",
             "tiers_payant",
+            "bio_i18n",
         }
         unknown = set(fields) - writable - {"lat", "lng", "specialty_slugs"}
         if unknown:
@@ -383,6 +387,8 @@ class DoctorController:
                 ZoneInfo(str(fields["timezone"]))
             except (ZoneInfoNotFoundError, ValueError) as exc:
                 raise SehatyValidationError(f"unknown timezone: {fields['timezone']!r}") from exc
+        if fields.get("bio_i18n") is not None:
+            fields["bio_i18n"] = clean_bio_i18n(fields["bio_i18n"])  # type: ignore[arg-type]
         if fields.get("opening_hours") is not None:
             fields["opening_hours"] = _validate_opening_hours(fields["opening_hours"])  # type: ignore[arg-type]
         if fields.get("insurances") is not None:
@@ -455,6 +461,7 @@ class DoctorController:
             DoctorProfile.slug,
             DoctorProfile.full_name,
             DoctorProfile.bio,
+            DoctorProfile.bio_i18n,
             DoctorProfile.photo_url,
             DoctorProfile.address,
             DoctorProfile.city,
@@ -497,6 +504,7 @@ class DoctorController:
             slug=row.slug,
             full_name=row.full_name,
             bio=row.bio,
+            bio_i18n=row.bio_i18n or {},
             photo_url=row.photo_url,
             address=row.address,
             city=row.city,
