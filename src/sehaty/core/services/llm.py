@@ -40,12 +40,41 @@ def api_key() -> str | None:
 
 
 def is_configured() -> bool:
-    """Whether the assistant can answer at all.
+    """Whether a key is present. Says nothing about whether it works.
 
     Checked before a screen offers a chat box, so a user is never invited to
-    type a question into something that cannot reply.
+    type a question into something with nothing behind it. Use `diagnose()` to
+    find out whether the provider actually answers — a wrong key or a retired
+    model leaves this returning True while every call fails.
     """
     return api_key() is not None
+
+
+def diagnose() -> tuple[bool, str]:
+    """Ask the provider one trivial question and report what came back.
+
+    Exists because "configured" and "working" are different states and the
+    difference was invisible: a key set to something the provider rejects left
+    the status endpoint reporting available, every triage silently falling back
+    to a generalist, and nothing anywhere saying why.
+
+    Returns (working, detail). Never raises — it is a diagnostic, and one that
+    throws is no use to whoever is trying to find out what is wrong.
+    """
+    if api_key() is None:
+        return False, "GROQ_API_KEY is not set"
+    try:
+        answer = complete(
+            system="Reply with the single word: ok",
+            user="ping",
+            max_tokens=8,
+            temperature=0.0,
+        )
+    except LLMUnavailable as exc:
+        return False, str(exc)
+    except Exception as exc:  # pragma: no cover - defensive
+        return False, f"{type(exc).__name__}: {exc}"
+    return True, f"model {DEFAULT_MODEL} replied {answer[:40]!r}"
 
 
 def complete(
@@ -92,7 +121,14 @@ def complete(
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
             body = json.load(response)
     except urllib.error.HTTPError as exc:  # pragma: no cover - provider-dependent
-        raise LLMUnavailable(f"provider returned {exc.code}") from exc
+        # Read the body: Groq explains a retired model or a rejected key there,
+        # and "provider returned 400" on its own sends you looking in the wrong
+        # place for an afternoon.
+        try:
+            detail = exc.read().decode("utf-8", "ignore")[:300]
+        except Exception:  # pragma: no cover
+            detail = ""
+        raise LLMUnavailable(f"provider returned {exc.code}: {detail}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:  # pragma: no cover
         raise LLMUnavailable("provider unreachable") from exc
 

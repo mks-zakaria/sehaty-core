@@ -124,6 +124,16 @@ class AssistantController:
         return llm.is_configured()
 
     @staticmethod
+    def diagnose() -> tuple[bool, str]:
+        """Whether the provider actually answers, and what it said if not.
+
+        Admin-only above this layer: the detail includes the provider's own
+        error text, which is exactly what an operator needs and exactly what a
+        patient should never see.
+        """
+        return llm.diagnose()
+
+    @staticmethod
     def triage(complaint: str, *, locale: str = "fr") -> Triage:
         """Turn a described problem into a specialty to search for.
 
