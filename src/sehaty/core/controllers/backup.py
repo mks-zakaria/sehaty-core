@@ -193,9 +193,14 @@ class BackupController:
                     errors.append(f"row {index}: no slug")
                     continue
 
-                profile = session.execute(
-                    select(DoctorProfile).where(DoctorProfile.slug == slug)
-                ).scalar_one_or_none()
+                found = session.execute(
+                    select(
+                        DoctorProfile,
+                        func.ST_Y(cast(DoctorProfile.geopoint, Geometry)).label("lat"),
+                        func.ST_X(cast(DoctorProfile.geopoint, Geometry)).label("lng"),
+                    ).where(DoctorProfile.slug == slug)
+                ).one_or_none()
+                profile = found.DoctorProfile if found else None
 
                 if profile is None:
                     # Creating from a backup would need a user row and an email,
@@ -210,7 +215,7 @@ class BackupController:
                     skipped_removed += 1
                     continue
 
-                if _apply(profile, row, dry_run=dry_run):
+                if _apply(profile, row, current=(found.lat, found.lng), dry_run=dry_run):
                     updated += 1
                 else:
                     unchanged += 1
@@ -246,7 +251,13 @@ _SIMPLE = (
 )
 
 
-def _apply(profile: DoctorProfile, row: dict, *, dry_run: bool) -> bool:
+def _apply(
+    profile: DoctorProfile,
+    row: dict,
+    *,
+    current: tuple[float | None, float | None],
+    dry_run: bool,
+) -> bool:
     """Copy what the backup knows onto the profile. Returns whether anything moved."""
     changed = False
 
@@ -276,15 +287,26 @@ def _apply(profile: DoctorProfile, row: dict, *, dry_run: bool) -> bool:
     lat, lng = row.get("lat"), row.get("lng")
     precision = row.get("geo_precision")
     if lat is not None and lng is not None:
+        current_lat, current_lng = current
+        stored_precision = str(profile.geo_precision) if profile.geo_precision else None
+        # Compare the point, not just the precision. Without this, replaying a
+        # backup taken seconds ago reports every EXACT pin as changed — the
+        # restore looks like it rewrote the directory when it did nothing.
+        same_point = (
+            current_lat is not None
+            and current_lng is not None
+            and abs(current_lat - float(lat)) < 1e-7
+            and abs(current_lng - float(lng)) < 1e-7
+            and stored_precision == precision
+        )
         # An EXACT pin someone stood outside to drop is the most expensive thing
         # in this file. It replaces an approximate one, and never the reverse.
-        current = str(profile.geo_precision) if profile.geo_precision else None
-        if current != "EXACT" or precision == "EXACT":
-            if profile.geopoint is None or precision == "EXACT":
-                if not dry_run:
-                    profile.geopoint = WKTElement(f"POINT({lng} {lat})", srid=_SRID)
-                    if precision:
-                        profile.geo_precision = precision
-                changed = True
+        may_replace = stored_precision != "EXACT" or precision == "EXACT"
+        if not same_point and may_replace:
+            if not dry_run:
+                profile.geopoint = WKTElement(f"POINT({lng} {lat})", srid=_SRID)
+                if precision:
+                    profile.geo_precision = precision
+            changed = True
 
     return changed

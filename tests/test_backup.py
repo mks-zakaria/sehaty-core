@@ -185,3 +185,32 @@ class TestRestore:
         report = BackupController.restore(self._payload(slug="dr-nobody"), dry_run=False)
 
         assert report.errors == ["dr-nobody: not in the directory, skipped"]
+
+
+@pytest.mark.usefixtures("_pg_engine")
+def test_replaying_a_fresh_backup_changes_nothing(pg_session: Session) -> None:
+    """The round trip, where it can actually run.
+
+    Restoring a file taken seconds ago must be a no-op. If it reports changes,
+    the export and the restore disagree about something, and the first anyone
+    would learn of it is a restore that quietly rewrote the directory.
+    """
+    _doctor(
+        pg_session,
+        email="round@c.ma",
+        slug="dr-round",
+        address="12 bd Zerktouni",
+        consultation_fee=250.0,
+        bio_i18n={"fr": "Cabinet au Maârif."},
+        insurances=["cnss"],
+        tiers_payant=True,
+        geopoint=WKTElement(f"POINT({_LNG} {_LAT})", srid=_SRID),
+        geo_precision=GeoPrecision.EXACT,
+    )
+
+    exported = BackupController.export()
+    report = BackupController.restore(exported.model_dump(mode="json"), dry_run=False)
+
+    assert report.updated == 0
+    assert report.unchanged == exported.count
+    assert report.errors == []
