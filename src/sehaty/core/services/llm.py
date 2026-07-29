@@ -27,6 +27,8 @@ import urllib.error
 import urllib.request
 
 DEFAULT_MODEL = os.environ.get("SEHATY_LLM_MODEL", "llama-3.3-70b-versatile")
+# Identifies us to the provider's edge. Anonymous clients get filtered.
+USER_AGENT = "Sehaty/1.0 (+https://sehaty.ma)"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 REQUEST_TIMEOUT = 30
 
@@ -115,6 +117,13 @@ def complete(
         headers={
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
+            # Groq sits behind Cloudflare, which rejects urllib's default
+            # "Python-urllib/3.x" signature with 403 error 1010. Without this the
+            # key looks wrong and every triage falls back to a generalist, which
+            # is the one failure the fallback is designed to be indistinguishable
+            # from.
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
         },
     )
     try:
