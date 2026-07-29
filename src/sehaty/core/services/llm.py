@@ -27,8 +27,10 @@ import urllib.error
 import urllib.request
 
 DEFAULT_MODEL = os.environ.get("SEHATY_LLM_MODEL", "llama-3.3-70b-versatile")
-# Identifies us to the provider's edge. Anonymous clients get filtered.
-USER_AGENT = "Sehaty/1.0 (+https://sehaty.ma)"
+# Identifies us to the provider's edge; anonymous clients get filtered. No URL:
+# sehaty.ma belongs to a third party, and pointing a provider at someone else's
+# domain as though it were ours is not a thing to ship.
+USER_AGENT = "Sehaty/1.0"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 REQUEST_TIMEOUT = 30
 
