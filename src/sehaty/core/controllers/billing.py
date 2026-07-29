@@ -37,6 +37,7 @@ from sehaty.core.errors import (
     SehatyForbiddenError,
     SehatyNotFoundError,
 )
+from sehaty.core.services.entitlement import entitlement_for
 
 # The three MAD/month plans Sehaty sells (code, name, price_month).
 _SEED_PLANS: tuple[tuple[str, str, float], ...] = (
@@ -50,13 +51,48 @@ _CURRENCY = "MAD"
 _PERIOD = timedelta(days=30)
 
 
+def _billing_state(entitlement, days: int | None) -> str:  # noqa: ANN001
+    """One word the interface can act on.
+
+    Distinguishes grace from expired because they need opposite messages: one is
+    "your agenda is still running, pay this week", the other is "it has stopped,
+    here is how to restart it". Collapsing them would tell half the doctors the
+    wrong thing.
+    """
+    if entitlement.status is None:
+        return "never_subscribed"
+    if entitlement.in_grace_period:
+        return "grace"
+    if not entitlement.booking_enabled:
+        return "expired"
+    if days is not None and days <= 7:
+        return "expiring_soon"
+    return "active"
+
+
 class SubscriptionSummary(DomainModel):
-    """A doctor's current billing picture (detached, column-only projection)."""
+    """A doctor's current billing picture (detached, column-only projection).
+
+    Carries the entitlement, not just the invoice, because the question a doctor
+    actually has is "does my agenda still work" — and until this existed the app
+    could not answer it. A lapsed doctor simply saw an empty agenda, which reads
+    as a broken product rather than an unpaid bill.
+    """
 
     plan: str | None
     status: str | None
     amount_due: float
     current_period_end: datetime | None
+
+    # Whether the booking engine is live right now.
+    booking_enabled: bool = False
+    # True during the days after expiry when it still works.
+    in_grace_period: bool = False
+    # Negative once the period has passed. None when there is no subscription.
+    days_remaining: int | None = None
+    # "active", "expiring_soon", "grace", "expired", "never_subscribed" — the
+    # thing the page needs in order to say something true.
+    state: str = "never_subscribed"
 
 
 class PlanRow(DomainModel):
@@ -393,7 +429,16 @@ class BillingController:
                 .where(Subscription.doctor_id == doctor_id)
             ).one_or_none()
             if row is None:
-                raise SehatyNotFoundError(f"doctor {doctor_id} has no subscription")
+                # Not an error. Most doctors never subscribed, and the app needs
+                # to render that as a state rather than as a failed request.
+                return SubscriptionSummary(
+                    plan=None,
+                    status=None,
+                    amount_due=0.0,
+                    current_period_end=None,
+                    booking_enabled=False,
+                    state="never_subscribed",
+                )
 
             amount_due = session.execute(
                 select(func.coalesce(func.sum(Invoice.amount), 0.0)).where(
@@ -401,11 +446,19 @@ class BillingController:
                     Invoice.status == InvoiceStatus.OPEN,
                 )
             ).scalar_one()
+            entitlement = entitlement_for(doctor_id)
+            days = None
+            if entitlement.current_period_end is not None:
+                days = (entitlement.current_period_end - datetime.now(UTC)).days
             return SubscriptionSummary(
                 plan=row.code,
                 status=str(row.status),
                 amount_due=float(amount_due),
                 current_period_end=row.current_period_end,
+                booking_enabled=entitlement.booking_enabled,
+                in_grace_period=entitlement.in_grace_period,
+                days_remaining=days,
+                state=_billing_state(entitlement, days),
             )
 
     @staticmethod
