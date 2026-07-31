@@ -19,6 +19,7 @@ from sehaty.db import (
     Appointment,
     Availability,
     AvailabilityException,
+    DoctorBookingSwitch,
     Plan,
     Subscription,
     SubscriptionStatus,
@@ -71,6 +72,8 @@ def db() -> sessionmaker[Session]:
             # keeps their page but loses the booking engine.
             Plan.__table__,
             Subscription.__table__,
+            # Entitlement consults the hand switch on every resolve.
+            DoctorBookingSwitch.__table__,
         ],
     )
     with engine.begin() as conn:

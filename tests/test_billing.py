@@ -16,6 +16,7 @@ from sehaty.db import (
     AdminConfig,
     AuditLog,
     CreditLedger,
+    DoctorBookingSwitch,
     Invoice,
     InvoiceStatus,
     Payment,
@@ -39,6 +40,8 @@ _TABLES = [
     User.__table__,
     Plan.__table__,
     Subscription.__table__,
+    # Entitlement consults the hand switch on every resolve.
+    DoctorBookingSwitch.__table__,
     Invoice.__table__,
     Payment.__table__,
     CreditLedger.__table__,

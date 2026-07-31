@@ -9,21 +9,36 @@ regression here would break QR plaques already hanging in waiting rooms.
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sehaty.db import Plan, Subscription, SubscriptionStatus, User, UserRole
+from sehaty.db import (
+    DoctorBookingSwitch,
+    Plan,
+    Subscription,
+    SubscriptionStatus,
+    User,
+    UserRole,
+)
 from sehaty.db.base import SehatyBase
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from sehaty.core.db import session as session_mod
+from sehaty.core.errors import SehatyNotFoundError
 from sehaty.core.services.entitlement import (
     GRACE_DAYS,
     booking_enabled,
     entitlement_for,
+    set_booking,
 )
 
 NOW = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
-_TABLES = [User.__table__, Plan.__table__, Subscription.__table__]
+_TABLES = [
+    User.__table__,
+    Plan.__table__,
+    Subscription.__table__,
+    # entitlement_for() consults the hand switch on every resolve.
+    DoctorBookingSwitch.__table__,
+]
 
 
 @pytest.fixture
@@ -198,3 +213,98 @@ class TestIsolation:
 
         assert booking_enabled(paid, now=NOW) is True
         assert booking_enabled(lapsed, now=NOW) is False
+
+
+class TestTheHandSwitch:
+    """Staff switching one cabinet's agenda off, independently of billing.
+
+    The two states this separates — "has not paid" and "does not want an agenda"
+    — used to be the same state, and conflating them costs money in both
+    directions: a doctor who only takes walk-ins gets chased for a payment that
+    would change nothing, and removing their booking button meant cancelling a
+    subscription they are happily paying for.
+    """
+
+    def test_it_closes_the_agenda_of_a_paid_up_doctor(self, db: sessionmaker[Session]) -> None:
+        doctor = _doctor(db)
+        _subscribe(
+            db, doctor, status=SubscriptionStatus.ACTIVE, period_end=NOW + timedelta(days=30)
+        )
+        assert booking_enabled(doctor, now=NOW) is True
+
+        result = set_booking(doctor, enabled=False, note="walk-ins only", now=NOW)
+
+        assert result.booking_enabled is False
+        assert result.reason == "switched_off"
+        # The subscription is untouched — they are still a paying customer.
+        assert result.status == str(SubscriptionStatus.ACTIVE)
+        assert result.manually_disabled is True
+
+    def test_it_can_never_grant_booking_by_itself(self, db: sessionmaker[Session]) -> None:
+        """The direction that protects the revenue.
+
+        Switching on a doctor whose subscription lapsed months ago must not hand
+        them the paid engine — otherwise a flag left on is a product given away.
+        """
+        doctor = _doctor(db)
+        _subscribe(
+            db, doctor, status=SubscriptionStatus.ACTIVE, period_end=NOW - timedelta(days=90)
+        )
+
+        result = set_booking(doctor, enabled=True, now=NOW)
+
+        assert result.booking_enabled is False
+        assert result.reason == "expired"
+        assert result.manually_disabled is False
+
+    def test_switching_on_at_the_visit_starts_the_free_trial(
+        self, db: sessionmaker[Session]
+    ) -> None:
+        """What "activate" has to mean at a desk.
+
+        Every doctor being sold their first pack has no subscription at all, so a
+        switch that only cleared a flag would leave the operator promising an
+        agenda that stays shut.
+        """
+        doctor = _doctor(db)
+        with db() as s:
+            s.add(Plan(code="basic", name="Basic", price_month=199.0))
+            s.commit()
+
+        result = set_booking(doctor, enabled=True, now=NOW)
+
+        assert result.booking_enabled is True
+        assert result.status == str(SubscriptionStatus.TRIALING)
+
+    def test_switching_off_and_on_again_does_not_buy_another_trial(
+        self, db: sessionmaker[Session]
+    ) -> None:
+        """Otherwise the free three months renew every time somebody fiddles."""
+        doctor = _doctor(db)
+        with db() as s:
+            s.add(Plan(code="basic", name="Basic", price_month=199.0))
+            s.commit()
+        first = set_booking(doctor, enabled=True, now=NOW)
+
+        set_booking(doctor, enabled=False, now=NOW + timedelta(days=1))
+        again = set_booking(doctor, enabled=True, now=NOW + timedelta(days=2))
+
+        assert again.booking_enabled is True
+        assert again.current_period_end == first.current_period_end
+
+    def test_a_doctor_nobody_switched_is_unaffected(self, db: sessionmaker[Session]) -> None:
+        """Every doctor on the platform today, so this is the regression guard."""
+        doctor = _doctor(db)
+        _subscribe(
+            db, doctor, status=SubscriptionStatus.ACTIVE, period_end=NOW + timedelta(days=30)
+        )
+
+        result = entitlement_for(doctor, now=NOW)
+
+        assert result.booking_enabled is True
+        assert result.manually_disabled is False
+        assert result.reason == "active"
+
+    def test_switching_an_unknown_doctor_is_refused(self, db: sessionmaker[Session]) -> None:
+        with pytest.raises(SehatyNotFoundError):
+            set_booking(999_999, enabled=True, now=NOW)

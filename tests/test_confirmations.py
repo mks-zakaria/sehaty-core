@@ -14,6 +14,7 @@ from sehaty.db import (
     AppointmentStatus,
     Cabinet,
     ConfirmationStatus,
+    DoctorBookingSwitch,
     OutboundMessage,
     PatientProfile,
     Plan,
@@ -52,6 +53,8 @@ _TABLES = [
     # Joining a waitlist checks the doctor still serves slots at all.
     Plan.__table__,
     Subscription.__table__,
+    # entitlement_for() consults the hand switch on every resolve.
+    DoctorBookingSwitch.__table__,
 ]
 
 NOW = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)

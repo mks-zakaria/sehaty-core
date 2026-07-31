@@ -13,7 +13,14 @@ import unicodedata
 from datetime import UTC, datetime
 
 import pytest
-from sehaty.db import ArticleStatus, ClaimStatus, DoctorProfile, User, UserRole
+from sehaty.db import (
+    ArticleStatus,
+    ClaimStatus,
+    DoctorProfile,
+    User,
+    UserRole,
+    ValidationVerdict,
+)
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -221,3 +228,292 @@ class TestArticles:
         # Documents today's behaviour so the gap is visible rather than assumed:
         # the answer stays up until the removal sweep takes the account with it.
         assert ArticleController.get_published(draft.slug).author_id == uid
+
+
+@pytest.mark.usefixtures("_pg_engine")
+class TestPlatformWritten:
+    """Articles the platform writes from the literature, signed by doctors.
+
+    The trade this encodes: we supply the writing, a doctor supplies the standing,
+    and the article sends readers to that doctor's page. Each half is worthless
+    alone — unsigned machine text nobody should act on, or a doctor with nothing
+    pointing at them.
+    """
+
+    SOURCES = [{"work": "Gray's Anatomy", "locator": "41e éd., ch. 12"}]
+
+    def test_it_is_written_without_an_author(self, pg_session: Session) -> None:
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une hernie discale ?",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+            specialty_slug="orthopedics",
+        )
+
+        assert article.author_id is None
+        assert [s.work for s in article.sources] == ["Gray's Anatomy"]
+        # DRAFT, not PENDING: the review queue is doctors' own answers waiting on
+        # a human, and a hundred generated drafts would bury them.
+        assert article.status == str(ArticleStatus.DRAFT)
+
+    def test_it_must_cite_something(self, pg_session: Session) -> None:
+        """An article that cites nothing gives the validating doctor nothing to
+        check, and a reader no reason to believe it."""
+        with pytest.raises(SehatyValidationError):
+            ArticleController.write_from_sources(
+                title="C'est quoi une hernie discale ?", body=BODY, sources=[], locale="fr"
+            )
+
+        with pytest.raises(SehatyValidationError):
+            ArticleController.write_from_sources(
+                title="C'est quoi une hernie discale ?",
+                body=BODY,
+                sources=[{"locator": "p. 12"}],
+                locale="fr",
+            )
+
+    def test_a_validating_doctor_becomes_the_byline(self, pg_session: Session) -> None:
+        """The link back to their page is the whole consideration."""
+        uid = _doctor(
+            pg_session, email="signer@c.ma", slug="dr-signer-casa", claim=ClaimStatus.CLAIMED
+        )
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une hernie discale ?",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+        )
+
+        signed = ArticleController.validate(article.id, uid)
+
+        assert [v.doctor_id for v in signed.validations] == [uid]
+        assert signed.validations[0].slug == "dr-signer-casa"
+        assert signed.validations[0].verdict == str(ValidationVerdict.VALIDATED)
+
+    def test_a_correction_must_say_what_changed(self, pg_session: Session) -> None:
+        """Otherwise RECTIFIED is a rubber stamp with a grander name."""
+        uid = _doctor(
+            pg_session, email="fixer@c.ma", slug="dr-fixer-casa", claim=ClaimStatus.CLAIMED
+        )
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une hernie discale ?",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+        )
+
+        with pytest.raises(SehatyValidationError):
+            ArticleController.validate(
+                article.id, uid, verdict=str(ValidationVerdict.RECTIFIED)
+            )
+
+        fixed = ArticleController.validate(
+            article.id,
+            uid,
+            verdict=str(ValidationVerdict.RECTIFIED),
+            note="La sciatique n'est pas systématique.",
+        )
+        assert fixed.validations[0].note.startswith("La sciatique")
+
+    def test_signing_twice_is_one_doctor_not_two(self, pg_session: Session) -> None:
+        """"Validated by four doctors" has to mean four people."""
+        uid = _doctor(
+            pg_session, email="twice@c.ma", slug="dr-twice-casa", claim=ClaimStatus.CLAIMED
+        )
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une hernie discale ?",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+        )
+        ArticleController.validate(article.id, uid)
+
+        again = ArticleController.validate(
+            article.id, uid, verdict=str(ValidationVerdict.ENRICHED), note="Ajout du délai CNSS."
+        )
+
+        assert len(again.validations) == 1
+        assert again.validations[0].verdict == str(ValidationVerdict.ENRICHED)
+
+    def test_an_unclaimed_doctor_cannot_sign(self, pg_session: Session) -> None:
+        """Same funnel as writing: an endorsement links to a page, and an
+        unclaimed page is one whose owner never agreed to any of this."""
+        uid = _doctor(
+            pg_session, email="cold2@c.ma", slug="dr-cold2", claim=ClaimStatus.UNCLAIMED
+        )
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une hernie discale ?",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+        )
+
+        with pytest.raises(SehatyForbiddenError):
+            ArticleController.validate(article.id, uid)
+
+    def test_the_public_read_carries_the_signatories(self, pg_session: Session) -> None:
+        """What the landing page renders as the byline."""
+        uid = _doctor(
+            pg_session, email="pub@c.ma", slug="dr-pub-casa", claim=ClaimStatus.CLAIMED
+        )
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une hernie discale ?",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+        )
+        ArticleController.validate(article.id, uid)
+        ArticleController.review(article.id, approve=True, now=NOW)
+
+        public = ArticleController.get_published(article.slug)
+
+        assert public.author_id is None
+        assert [v.slug for v in public.validations] == ["dr-pub-casa"]
+        assert [s.work for s in public.sources] == ["Gray's Anatomy"]
+
+
+def test_arabic_punctuation_never_reaches_the_url() -> None:
+    """An Arabic question mark inside a URL path.
+
+    Arabic punctuation lives in the same Unicode block as Arabic letters, so the
+    slug rule that keeps the letters kept the punctuation too. It survives
+    percent-encoding, but it breaks naive link detection in the messaging apps
+    these pages are shared on — and a URL that looks broken does not get
+    forwarded, which is the whole distribution channel here.
+    """
+    slug = article_slug("التعب الدائم: هل يمكن أن يكون فقر دم؟")
+
+    assert "؟" not in slug
+    assert "،" not in slug
+    # The Arabic letters themselves must survive — transliterating produces a URL
+    # nobody recognises and nothing links to.
+    assert "فقر" in slug
+    assert slug.endswith("دم")
+
+
+@pytest.mark.usefixtures("_pg_engine")
+class TestReaderVotes:
+    """Readers answering "did this help you?".
+
+    The tally is not decoration: an article with many readers and a falling
+    helpful rate is one to send back to a doctor. What it must never become is a
+    record of who read what.
+    """
+
+    SOURCES = [{"work": "Pathology Illustrated", "locator": "p. 1"}]
+
+    def _published(self) -> str:
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une hernie discale ?",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+        )
+        ArticleController.review(article.id, approve=True, now=NOW)
+        return article.slug
+
+    def test_a_reader_votes_once_however_many_times_they_click(
+        self, pg_session: Session
+    ) -> None:
+        """Otherwise one enthusiastic reader looks like a consensus."""
+        slug = self._published()
+
+        ArticleController.vote(slug, fingerprint="reader-a", helpful=True)
+        again = ArticleController.vote(slug, fingerprint="reader-a", helpful=True)
+
+        assert (again.helpful_votes, again.total_votes) == (1, 1)
+
+    def test_changing_your_mind_replaces_the_vote(self, pg_session: Session) -> None:
+        slug = self._published()
+        ArticleController.vote(slug, fingerprint="reader-a", helpful=True)
+
+        changed = ArticleController.vote(slug, fingerprint="reader-a", helpful=False)
+
+        assert (changed.helpful_votes, changed.total_votes) == (0, 1)
+
+    def test_different_readers_are_counted_separately(self, pg_session: Session) -> None:
+        slug = self._published()
+
+        ArticleController.vote(slug, fingerprint="reader-a", helpful=True)
+        ArticleController.vote(slug, fingerprint="reader-b", helpful=True)
+        result = ArticleController.vote(slug, fingerprint="reader-c", helpful=False)
+
+        assert (result.helpful_votes, result.total_votes) == (2, 3)
+
+    def test_the_same_reader_is_not_traceable_across_articles(
+        self, pg_session: Session
+    ) -> None:
+        """The property that keeps this from becoming a browsing record.
+
+        Keys are scoped per article, so the vote table cannot be joined on
+        `voter_key` to reconstruct which articles one person read — which on
+        health pages is the most sensitive thing we could hold.
+        """
+        first = ArticleController.voter_key(1, "reader-a")
+        second = ArticleController.voter_key(2, "reader-a")
+
+        assert first != second
+        # And nothing about the reader survives in the key itself.
+        assert "reader-a" not in first
+
+    def test_an_unpublished_article_takes_no_votes(self, pg_session: Session) -> None:
+        draft = ArticleController.write_from_sources(
+            title="Brouillon non publié", body=BODY, sources=self.SOURCES, locale="fr"
+        )
+
+        with pytest.raises(SehatyNotFoundError):
+            ArticleController.vote(draft.slug, fingerprint="reader-a", helpful=True)
+
+
+@pytest.mark.usefixtures("_pg_engine")
+class TestArticleTraffic:
+    """Our own readership numbers, which is what topic selection should run on.
+
+    It ran on published disease prevalence instead — a measure of who is ill, not
+    of who is searching. These two are not the same population and the difference
+    decides what is worth writing.
+    """
+
+    SOURCES = [{"work": "Pathology Illustrated", "locator": "p. 1"}]
+
+    def _published(self, title: str = "C'est quoi une hernie discale ?") -> str:
+        article = ArticleController.write_from_sources(
+            title=title, body=BODY, sources=self.SOURCES, locale="fr"
+        )
+        ArticleController.review(article.id, approve=True, now=NOW)
+        return article.slug
+
+    def test_it_separates_the_channel_a_reader_arrived_by(self, pg_session: Session) -> None:
+        """"Ranks on Google" and "travels on WhatsApp" need different articles."""
+        slug = self._published()
+
+        for source in ("google", "google", "whatsapp", "facebook"):
+            ArticleController.record_event(slug, event="PAGE_VIEW", source=source)
+
+        row = ArticleController.traffic()[0]
+        assert row.views == 4
+        assert (row.from_google, row.from_whatsapp, row.from_facebook) == (2, 1, 1)
+
+    def test_it_counts_readers_sent_to_a_doctor_separately(self, pg_session: Session) -> None:
+        """An article that is read and one that sends a reader to a doctor are
+        different kinds of success. Only the second pays for itself."""
+        uid = _doctor(
+            pg_session, email="traffic@c.ma", slug="dr-traffic", claim=ClaimStatus.CLAIMED
+        )
+        slug = self._published()
+        ArticleController.record_event(slug, event="PAGE_VIEW", source="google")
+        ArticleController.record_event(slug, event="DOCTOR_CLICK", source="google", doctor_id=uid)
+
+        row = ArticleController.traffic()[0]
+        assert (row.views, row.doctor_clicks) == (1, 1)
+
+    def test_a_beacon_for_an_unknown_article_is_ignored_not_an_error(
+        self, pg_session: Session
+    ) -> None:
+        """This is called fire-and-forget from the page. A reader's article must
+        never fail because analytics did."""
+        ArticleController.record_event("no-such-article", event="PAGE_VIEW", source="google")
+        ArticleController.record_event(self._published(), event="NONSENSE", source="google")
+
+        assert ArticleController.traffic() == []
