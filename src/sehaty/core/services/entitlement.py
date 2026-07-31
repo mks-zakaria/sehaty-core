@@ -19,15 +19,30 @@ WhatsApp / Itinéraire buttons keep working forever, for everyone. Three reasons
 
 So expiry degrades the product to what a doctor had before they ever paid, and
 no further.
+
+There is a second, independent reason a cabinet has no agenda: they do not want
+one. Walk-ins only, or a secretary away for the month. That is what
+``doctor_booking_switches`` holds — a hand switch staff throw at the desk, which
+answers a different question from "have they paid" and must not be expressed by
+cancelling a subscription they are paying for.
+
+The two compose in one direction only:
+
+    booking = entitled(subscription)  AND NOT manually disabled
+
+So the switch can take booking away and never grant it. An expired subscription
+still closes the agenda by itself, and nobody ends up with the paid engine for
+free because a flag was left on.
 """
 
 from datetime import UTC, datetime, timedelta
 
-from sehaty.db import Plan, Subscription, SubscriptionStatus
+from sehaty.db import DoctorBookingSwitch, Plan, Subscription, SubscriptionStatus, User, UserRole
 from sqlalchemy import select
 
 from sehaty.core._dto import DomainModel
 from sehaty.core.db.session import get_session
+from sehaty.core.errors import SehatyNotFoundError
 
 # Statuses that still entitle a doctor to the booking engine. TRIALING counts:
 # the three free months are sold as the real product, not a crippled preview.
@@ -49,8 +64,14 @@ class Entitlement(DomainModel):
     current_period_end: datetime | None
     in_grace_period: bool
     # Machine-readable cause, for the UI to phrase: "no_subscription",
-    # "expired", "cancelled", "past_due", or "active".
+    # "expired", "cancelled", "past_due", "switched_off", or "active".
     reason: str
+    # True when staff switched the agenda off by hand. Reported separately from
+    # `reason` because it answers a different question for whoever is looking:
+    # `reason` says why booking is off, this says whether *money* is the cause.
+    # A collections board that chases a doctor who simply does not want an agenda
+    # burns the relationship the packs are sold on.
+    manually_disabled: bool = False
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -70,6 +91,15 @@ def entitlement_for(doctor_id: int, *, now: datetime | None = None) -> Entitleme
     now = now or datetime.now(UTC)
 
     with get_session() as session:
+        switched_off = (
+            session.execute(
+                select(DoctorBookingSwitch.disabled_at).where(
+                    DoctorBookingSwitch.doctor_id == doctor_id
+                )
+            ).scalar_one_or_none()
+            is not None
+        )
+
         subscription = session.execute(
             select(Subscription)
             .where(Subscription.doctor_id == doctor_id)
@@ -84,7 +114,10 @@ def entitlement_for(doctor_id: int, *, now: datetime | None = None) -> Entitleme
                 status=None,
                 current_period_end=None,
                 in_grace_period=False,
-                reason="no_subscription",
+                # Never paid *and* switched off by hand: say the hand switch, so
+                # nobody "fixes" it by taking a payment that changes nothing.
+                reason="switched_off" if switched_off else "no_subscription",
+                manually_disabled=switched_off,
             )
 
         status = subscription.status
@@ -109,6 +142,12 @@ def entitlement_for(doctor_id: int, *, now: datetime | None = None) -> Entitleme
             enabled = True
             reason = "active"
 
+        # The hand switch is applied last and only ever subtracts, so a doctor
+        # who stops paying still loses the agenda on schedule.
+        if switched_off:
+            reason = "switched_off"
+            enabled = False
+
         return Entitlement(
             doctor_id=doctor_id,
             booking_enabled=enabled,
@@ -116,12 +155,61 @@ def entitlement_for(doctor_id: int, *, now: datetime | None = None) -> Entitleme
             current_period_end=period_end,
             in_grace_period=in_grace,
             reason=reason if not enabled else "active",
+            manually_disabled=switched_off,
         )
 
 
 def booking_enabled(doctor_id: int, *, now: datetime | None = None) -> bool:
     """Shorthand for the one question most callers actually have."""
     return entitlement_for(doctor_id, now=now).booking_enabled
+
+
+def set_booking(
+    doctor_id: int,
+    *,
+    enabled: bool,
+    note: str | None = None,
+    now: datetime | None = None,
+) -> Entitlement:
+    """Turn a doctor's booking engine on or off from the console.
+
+    This is the switch thrown at the cabinet while the pack is being sold, so it
+    does the whole of what "activate" means there rather than half of it:
+
+    * **on** clears any hand switch *and* starts the free trial if the doctor has
+      no subscription at all — which is every doctor who has just been sold their
+      first pack. Starting the trial is idempotent, so switching off and on again
+      never buys them another ninety days.
+    * **off** records the switch. It survives payment, renewal and dunning,
+      because a doctor who does not want an agenda has not stopped being a
+      customer.
+
+    Returns the entitlement as it now stands, so the caller shows the doctor the
+    real state rather than the one it assumes it just created — "on" for a doctor
+    whose subscription expired months ago correctly reports booking still off.
+    """
+    now = now or datetime.now(UTC)
+
+    with get_session() as session:
+        doctor = session.get(User, doctor_id)
+        if doctor is None or doctor.role != UserRole.DOCTOR:
+            raise SehatyNotFoundError(f"no doctor with id {doctor_id}")
+
+        switch = session.get(DoctorBookingSwitch, doctor_id)
+        if switch is None:
+            switch = DoctorBookingSwitch(doctor_id=doctor_id)
+            session.add(switch)
+        switch.disabled_at = None if enabled else now
+        if note is not None:
+            switch.note = note.strip() or None
+        session.flush()
+
+    if enabled:
+        # After clearing the switch, not before: a doctor who is only blocked by
+        # hand keeps the subscription they already have.
+        start_trial_if_absent(doctor_id, now=now)
+
+    return entitlement_for(doctor_id, now=now)
 
 
 # Length of the free trial a newly accredited doctor gets. Matches the three

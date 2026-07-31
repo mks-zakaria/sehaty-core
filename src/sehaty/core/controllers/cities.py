@@ -62,8 +62,13 @@ def _eligible():
     )
 
 
-def _group_by_slug(names: list[str | None]) -> list[PlaceRef]:
-    """Collapse display spellings into one entry per slug, most common wins."""
+def group_by_slug(names: list[str | None]) -> list[PlaceRef]:
+    """Collapse display spellings into one entry per slug, most common wins.
+
+    Public because onboarding needs the same collapse over a different (wider)
+    set of doctors: the operator's city filter must offer one "Casablanca", not
+    the three spellings the import left behind.
+    """
     by_slug: dict[str, Counter] = {}
     for name in names:
         if not name or not name.strip():
@@ -89,7 +94,7 @@ class CityController:
         """Every city with at least one VERIFIED, active doctor."""
         with get_session() as session:
             rows = session.execute(_eligible()).all()
-        return _group_by_slug([row.city for row in rows])
+        return group_by_slug([row.city for row in rows])
 
     @staticmethod
     def list_districts(city: str) -> list[PlaceRef]:
@@ -104,7 +109,7 @@ class CityController:
         matches = set(match_display_names(city, [row.city for row in rows]))
         if not matches:
             return []
-        return _group_by_slug([row.district for row in rows if row.city in matches])
+        return group_by_slug([row.district for row in rows if row.city in matches])
 
     @staticmethod
     def list_city_specialties(city: str) -> list[CitySpecialtyRef]:

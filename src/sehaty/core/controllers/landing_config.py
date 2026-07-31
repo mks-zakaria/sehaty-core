@@ -1,6 +1,14 @@
 """Resolving which landing template a doctor's page uses, and its content.
 
-Resolution order, most specific first:
+Two independent decisions, and keeping them apart is the point:
+
+* the **template** answers *which sections the page has, and in what order* —
+  a property of the specialty, so it is inherited and almost never chosen;
+* the **layout** answers *what the page looks like* — hero shape, photo
+  treatment, density, typography. Nothing about a dentist implies a look, so
+  this one is picked per doctor by staff at the visit.
+
+Template resolution order, most specific first:
 
 1. an explicit ``template`` the doctor (or an admin) chose;
 2. the default for their **primary** specialty;
@@ -9,6 +17,10 @@ Resolution order, most specific first:
 Step 2 is what makes this worth building: almost no doctor will ever pick a
 template, and they should not have to. A dentist gets the dentist page because
 they are a dentist.
+
+Layout has no such inheritance — an unset layout is ``"classic"``, the design
+every already-published page carries. A doctor whose QR is printed and on a wall
+must not change appearance because a default moved.
 
 "Primary specialty" is the first by name — a doctor tagged both `dentistry` and
 `orthopedics` needs *one* page, and picking deterministically beats picking
@@ -48,6 +60,16 @@ SPECIALTY_TEMPLATES = {
 DEFAULT_TEMPLATE = "general"
 KNOWN_TEMPLATES = frozenset(SPECIALTY_TEMPLATES.values()) | {DEFAULT_TEMPLATE}
 
+# The page designs the landing app can build any template with. Kept in the same
+# order the console offers them, which is roughly least to most opinionated.
+#
+# Like templates, these are keys onto code that lives in the landing app — the
+# markup never reaches Postgres, so a fifth design is a deploy rather than a
+# migration.
+LAYOUTS = ("classic", "editorial", "compact", "clinique")
+DEFAULT_LAYOUT = "classic"
+KNOWN_LAYOUTS = frozenset(LAYOUTS)
+
 _MAX_SERVICES = 40
 _MAX_FAQ = 20
 
@@ -71,6 +93,14 @@ class LandingConfig(DomainModel):
     # True when the template came from the doctor's specialty rather than an
     # explicit choice — useful in the admin console to show what is inherited.
     template_is_default: bool
+    # Which design the template is built with. Always present and always applied,
+    # including on a free page: the layout is staff's choice about how the
+    # directory looks, not content the doctor is renting, and a lapsed
+    # subscription quietly restyling a page whose QR is printed on a plaque would
+    # be a far worse surprise than losing the services list.
+    layout: str
+    # True while nobody has picked one and the page is on the "classic" default.
+    layout_is_default: bool
     accent: str | None
     section_order: list[str]
     services: list[ServiceItem]
@@ -85,6 +115,8 @@ def _blank(template: str) -> LandingConfig:
     return LandingConfig(
         template=template,
         template_is_default=True,
+        layout=DEFAULT_LAYOUT,
+        layout_is_default=True,
         accent=None,
         section_order=[],
         services=[],
@@ -121,6 +153,11 @@ class LandingConfigController:
             chosen = row.template if row.template in KNOWN_TEMPLATES else None
             template = chosen or fallback
 
+            # A layout key retired from the landing app reads as unset rather
+            # than 500-ing a published page.
+            picked_layout = row.layout if row.layout in KNOWN_LAYOUTS else None
+            layout = picked_layout or DEFAULT_LAYOUT
+
             if not row.is_personalized:
                 # The free tier keeps the specialty shape but none of the
                 # doctor's own content — otherwise the paid tier has nothing
@@ -129,6 +166,9 @@ class LandingConfigController:
                 return LandingConfig(
                     template=template,
                     template_is_default=chosen is None,
+                    # The layout survives here on purpose — see the field comment.
+                    layout=layout,
+                    layout_is_default=picked_layout is None,
                     accent=None,
                     section_order=[],
                     services=[],
@@ -141,6 +181,8 @@ class LandingConfigController:
             return LandingConfig(
                 template=template,
                 template_is_default=chosen is None,
+                layout=layout,
+                layout_is_default=picked_layout is None,
                 accent=row.accent,
                 section_order=list(row.section_order or []),
                 services=[
@@ -163,6 +205,7 @@ class LandingConfigController:
         doctor_id: int,
         *,
         template: str | None = None,
+        layout: str | None = None,
         accent: str | None = None,
         section_order: list[str] | None = None,
         services: list[dict] | None = None,
@@ -179,6 +222,11 @@ class LandingConfigController:
         """
         if template is not None and template not in KNOWN_TEMPLATES:
             raise SehatyValidationError(f"unknown template: {template!r}")
+        if layout is not None and layout not in KNOWN_LAYOUTS:
+            # Refuse rather than fall back silently: a typo that stores a dead
+            # key would publish the classic page while the console showed the
+            # design the operator believes they sold.
+            raise SehatyValidationError(f"unknown layout: {layout!r}")
         if accent is not None and not _is_hex_colour(accent):
             raise SehatyValidationError(f"accent must be a hex colour, got {accent!r}")
         if services is not None and len(services) > _MAX_SERVICES:
@@ -199,6 +247,8 @@ class LandingConfigController:
             # profile upsert, so a partial save never wipes the rest.
             if template is not None:
                 row.template = template
+            if layout is not None:
+                row.layout = layout
             if accent is not None:
                 row.accent = accent
             if section_order is not None:

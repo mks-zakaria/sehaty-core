@@ -27,7 +27,13 @@ def _specialty(session: Session, slug: str = "dentistry") -> int:
     return s.id
 
 
-def _doctor(session: Session, name: str, slug: str, claim=ClaimStatus.UNCLAIMED) -> int:
+def _doctor(
+    session: Session,
+    name: str,
+    slug: str,
+    claim=ClaimStatus.UNCLAIMED,
+    city: str = "Casablanca",
+) -> int:
     user = User(email=f"{slug}@import.invalid", role=UserRole.DOCTOR, is_active=True)
     session.add(user)
     session.commit()
@@ -37,7 +43,7 @@ def _doctor(session: Session, name: str, slug: str, claim=ClaimStatus.UNCLAIMED)
             full_name=name,
             slug=slug,
             license_no=f"LIC-{user.id}",
-            city="Casablanca",
+            city=city,
             claim_status=claim,
         )
     )
@@ -90,6 +96,68 @@ class TestOnboardingSearch:
     def test_a_single_character_is_refused(self, pg_session: Session) -> None:
         with pytest.raises(SehatyValidationError):
             OnboardingController.search("a")
+
+
+@pytest.mark.usefixtures("_pg_engine")
+class TestOnboardingCityFilter:
+    """Telling two doctors with the same surname apart.
+
+    Picking the wrong Bennani is as expensive as creating a duplicate: the hours,
+    the pin and the login all land on a cabinet in another city.
+    """
+
+    def test_narrows_to_the_city_in_front_of_the_operator(self, pg_session: Session) -> None:
+        casa = _doctor(pg_session, "Dr Amina Bennani", "dr-amina-bennani-casablanca")
+        _doctor(pg_session, "Dr Amina Bennani", "dr-amina-bennani-rabat", city="Rabat")
+
+        assert len(OnboardingController.search("bennani")) == 2
+        assert [m.doctor_id for m in OnboardingController.search("bennani", city="casablanca")] == [
+            casa
+        ]
+
+    def test_a_spelling_or_an_accent_does_not_empty_the_filter(self, pg_session: Session) -> None:
+        """The import left three spellings of one city, and nobody types the accent."""
+        _doctor(pg_session, "Dr Karim Alami", "dr-karim-alami-sale", city="Salé")
+        _doctor(pg_session, "Dr Nadia Alami", "dr-nadia-alami-sale", city="sale ")
+
+        assert len(OnboardingController.search("alami", city="sale")) == 2
+        # A display name works as well as a slug — the console sends either.
+        assert len(OnboardingController.search("alami", city="Salé")) == 2
+
+    def test_an_unknown_city_returns_nothing_rather_than_everything(
+        self, pg_session: Session
+    ) -> None:
+        """A filter that silently stops applying is how the wrong page gets opened."""
+        _doctor(pg_session, "Dr Amina Bennani", "dr-amina-bennani-casablanca")
+
+        assert OnboardingController.search("bennani", city="tanger") == []
+
+    def test_cities_offers_every_place_with_a_findable_doctor(self, pg_session: Session) -> None:
+        """Busiest first, one entry per city however it was spelled."""
+        _doctor(pg_session, "Dr One", "dr-one-casa", city="Casablanca")
+        _doctor(pg_session, "Dr Two", "dr-two-casa", city="casablanca")
+        _doctor(pg_session, "Dr Three", "dr-three-rabat", city="Rabat")
+
+        offered = OnboardingController.cities()
+
+        assert [(p.slug, p.doctor_count) for p in offered] == [
+            ("casablanca", 2),
+            ("rabat", 1),
+        ]
+        # One label, spelled the way most doctors have it.
+        assert offered[0].label == "Casablanca"
+
+    def test_a_delisted_doctor_does_not_hold_a_city_open(self, pg_session: Session) -> None:
+        """Same tombstone rule as the search, or the filter offers a dead city."""
+        uid = _doctor(pg_session, "Dr Gone Away", "dr-gone-away-tanger", city="Tanger")
+        with pg_session.begin():
+            pg_session.execute(
+                update(DoctorProfile)
+                .where(DoctorProfile.user_id == uid)
+                .values(claim_status=ClaimStatus.REMOVAL_REQUESTED)
+            )
+
+        assert "tanger" not in {p.slug for p in OnboardingController.cities()}
 
 
 @pytest.mark.usefixtures("_pg_engine")

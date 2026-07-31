@@ -15,6 +15,20 @@ name: deploy
 #   - /opt/sehaty/sehaty-api/deploy/.env filled in (see deploy/.env.example)
 #   - Docker + the compose plugin installed
 #
+# Because the schema is applied unattended, the deploy takes a physical snapshot
+# of the database first — after the image builds, immediately before `up -d` runs
+# the migration. A migration that drops a column is not something `alembic
+# downgrade` gives the data back from, and the logical export in
+# `sehaty-core/controllers/backup.py` deliberately carries doctor profiles only.
+# The last ten snapshots are kept in /opt/sehaty/backups; to put one back:
+#
+#   cd /opt/sehaty/sehaty-api/deploy
+#   docker compose -f docker-compose.prod.yml --env-file .env exec -T db \
+#     pg_restore -U sehaty -d sehaty --clean --if-exists \
+#     < /opt/sehaty/backups/pre-migrate-<stamp>.dump
+#
+# Skipped on the very first deploy, when there is no database container yet.
+#
 # Required secrets (repo or org level): DO_HOST, DO_USER, DO_SSH_KEY.
 # Until DO_HOST is set the deploy step is skipped (a green no-op).
 
@@ -54,5 +68,10 @@ jobs:
             cd /opt/sehaty/sehaty-api && git fetch origin main && git reset --hard origin/main
             cd /opt/sehaty/sehaty-api/deploy
             docker compose -f docker-compose.prod.yml --env-file .env build
+            mkdir -p /opt/sehaty/backups
+            docker compose -f docker-compose.prod.yml --env-file .env ps -q db > /tmp/sehaty-db-cid
+            test ! -s /tmp/sehaty-db-cid || docker compose -f docker-compose.prod.yml --env-file .env exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "/opt/sehaty/backups/pre-migrate-$(date -u +%Y%m%dT%H%M%SZ).dump"
+            test ! -s /tmp/sehaty-db-cid || ls -lht /opt/sehaty/backups/pre-migrate-*.dump | head -1
+            ls -1t /opt/sehaty/backups/pre-migrate-*.dump 2>/dev/null | tail -n +11 | xargs -r rm -f
             docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans
             docker image prune -f
