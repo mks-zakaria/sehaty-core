@@ -54,9 +54,7 @@ class TestLayout:
         assert config.layout == DEFAULT_LAYOUT == "classic"
         assert config.layout_is_default is True
 
-    def test_the_design_is_independent_of_the_specialty_template(
-        self, pg_session: Session
-    ) -> None:
+    def test_the_design_is_independent_of_the_specialty_template(self, pg_session: Session) -> None:
         """A dentist page stays acts-first whichever design it is built with."""
         doctor_id = _doctor(pg_session)
 

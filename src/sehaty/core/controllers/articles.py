@@ -423,9 +423,7 @@ class ArticleController:
             if isinstance(item, dict) and str(item.get("work", "")).strip()
         ]
         if not cited:
-            raise SehatyValidationError(
-                "a platform-written article must cite at least one source"
-            )
+            raise SehatyValidationError("a platform-written article must cite at least one source")
 
         _check_text(title=title, body=body, locale=locale)
 
@@ -478,9 +476,7 @@ class ArticleController:
 
         note = (note or "").strip() or None
         if chosen is not ValidationVerdict.VALIDATED and not note:
-            raise SehatyValidationError(
-                f"say what you changed: a {chosen} needs a note"
-            )
+            raise SehatyValidationError(f"say what you changed: a {chosen} needs a note")
 
         with get_session() as session:
             article = session.get(Article, article_id)
@@ -628,12 +624,12 @@ class ArticleController:
                         case((ArticleEvent.type == ArticleEventType.DOCTOR_CLICK, 1), else_=0)
                     ).label("doctor_clicks"),
                     func.sum(case((ArticleEvent.source == "google", 1), else_=0)).label("google"),
-                    func.sum(
-                        case((ArticleEvent.source == "whatsapp", 1), else_=0)
-                    ).label("whatsapp"),
-                    func.sum(
-                        case((ArticleEvent.source == "facebook", 1), else_=0)
-                    ).label("facebook"),
+                    func.sum(case((ArticleEvent.source == "whatsapp", 1), else_=0)).label(
+                        "whatsapp"
+                    ),
+                    func.sum(case((ArticleEvent.source == "facebook", 1), else_=0)).label(
+                        "facebook"
+                    ),
                 )
                 .join(ArticleEvent, ArticleEvent.article_id == Article.id)
                 .where(ArticleEvent.occurred_at >= since)

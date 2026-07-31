@@ -304,9 +304,7 @@ class TestPlatformWritten:
         )
 
         with pytest.raises(SehatyValidationError):
-            ArticleController.validate(
-                article.id, uid, verdict=str(ValidationVerdict.RECTIFIED)
-            )
+            ArticleController.validate(article.id, uid, verdict=str(ValidationVerdict.RECTIFIED))
 
         fixed = ArticleController.validate(
             article.id,
@@ -317,7 +315,7 @@ class TestPlatformWritten:
         assert fixed.validations[0].note.startswith("La sciatique")
 
     def test_signing_twice_is_one_doctor_not_two(self, pg_session: Session) -> None:
-        """"Validated by four doctors" has to mean four people."""
+        """ "Validated by four doctors" has to mean four people."""
         uid = _doctor(
             pg_session, email="twice@c.ma", slug="dr-twice-casa", claim=ClaimStatus.CLAIMED
         )
@@ -339,9 +337,7 @@ class TestPlatformWritten:
     def test_an_unclaimed_doctor_cannot_sign(self, pg_session: Session) -> None:
         """Same funnel as writing: an endorsement links to a page, and an
         unclaimed page is one whose owner never agreed to any of this."""
-        uid = _doctor(
-            pg_session, email="cold2@c.ma", slug="dr-cold2", claim=ClaimStatus.UNCLAIMED
-        )
+        uid = _doctor(pg_session, email="cold2@c.ma", slug="dr-cold2", claim=ClaimStatus.UNCLAIMED)
         article = ArticleController.write_from_sources(
             title="C'est quoi une hernie discale ?",
             body=BODY,
@@ -354,9 +350,7 @@ class TestPlatformWritten:
 
     def test_the_public_read_carries_the_signatories(self, pg_session: Session) -> None:
         """What the landing page renders as the byline."""
-        uid = _doctor(
-            pg_session, email="pub@c.ma", slug="dr-pub-casa", claim=ClaimStatus.CLAIMED
-        )
+        uid = _doctor(pg_session, email="pub@c.ma", slug="dr-pub-casa", claim=ClaimStatus.CLAIMED)
         article = ArticleController.write_from_sources(
             title="C'est quoi une hernie discale ?",
             body=BODY,
@@ -413,9 +407,7 @@ class TestReaderVotes:
         ArticleController.review(article.id, approve=True, now=NOW)
         return article.slug
 
-    def test_a_reader_votes_once_however_many_times_they_click(
-        self, pg_session: Session
-    ) -> None:
+    def test_a_reader_votes_once_however_many_times_they_click(self, pg_session: Session) -> None:
         """Otherwise one enthusiastic reader looks like a consensus."""
         slug = self._published()
 
@@ -441,9 +433,7 @@ class TestReaderVotes:
 
         assert (result.helpful_votes, result.total_votes) == (2, 3)
 
-    def test_the_same_reader_is_not_traceable_across_articles(
-        self, pg_session: Session
-    ) -> None:
+    def test_the_same_reader_is_not_traceable_across_articles(self, pg_session: Session) -> None:
         """The property that keeps this from becoming a browsing record.
 
         Keys are scoped per article, so the vote table cannot be joined on
@@ -485,7 +475,7 @@ class TestArticleTraffic:
         return article.slug
 
     def test_it_separates_the_channel_a_reader_arrived_by(self, pg_session: Session) -> None:
-        """"Ranks on Google" and "travels on WhatsApp" need different articles."""
+        """ "Ranks on Google" and "travels on WhatsApp" need different articles."""
         slug = self._published()
 
         for source in ("google", "google", "whatsapp", "facebook"):
