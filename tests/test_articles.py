@@ -507,3 +507,125 @@ class TestArticleTraffic:
         ArticleController.record_event(self._published(), event="NONSENSE", source="google")
 
         assert ArticleController.traffic() == []
+
+
+@pytest.mark.usefixtures("_pg_engine")
+class TestLanguageVersions:
+    """The same answer, written in two languages, joined by a topic key.
+
+    Not a translation pointer: neither version is the original. Each is written
+    from the same passages in its own language, so the pairing is symmetric and
+    an article never has to know which one came first.
+    """
+
+    SOURCES = [{"work": "Pathology Illustrated (7th ed.), Reid et al.", "locator": "p. 640"}]
+
+    def _pair(self) -> tuple[int, int]:
+        fr = ArticleController.write_from_sources(
+            title="Diabète et plage : quels risques pour les pieds ?",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+            topic_key="diabetes-beach",
+        )
+        ar = ArticleController.write_from_sources(
+            title="السكري والشاطئ: ما هي المخاطر على القدمين؟",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="ar",
+            topic_key="diabetes-beach",
+        )
+        return fr.id, ar.id
+
+    def test_each_version_offers_the_other(self, pg_session: Session) -> None:
+        fr_id, ar_id = self._pair()
+        ArticleController.review(fr_id, approve=True)
+        ArticleController.review(ar_id, approve=True)
+
+        fr = ArticleController.get(fr_id)
+        ar = ArticleController.get(ar_id)
+
+        assert [t.locale for t in fr.translations] == ["ar"]
+        assert [t.locale for t in ar.translations] == ["fr"]
+        # The title travels with the link: a switch showing only a language code
+        # asks the reader to trust that the other page is the same article.
+        assert fr.translations[0].title.startswith("السكري")
+        assert fr.translations[0].slug == ar.slug
+
+    def test_an_unpublished_counterpart_is_never_linked(self, pg_session: Session) -> None:
+        """Linking a draft would hand the reader a 404."""
+        fr_id, ar_id = self._pair()
+        ArticleController.review(fr_id, approve=True)
+
+        assert ArticleController.get(fr_id).translations == []
+
+        ArticleController.review(ar_id, approve=True)
+        assert len(ArticleController.get(fr_id).translations) == 1
+
+    def test_an_article_never_offers_itself(self, pg_session: Session) -> None:
+        fr_id, _ = self._pair()
+        ArticleController.review(fr_id, approve=True)
+
+        fr = ArticleController.get(fr_id)
+        assert all(t.slug != fr.slug for t in fr.translations)
+
+    def test_an_article_without_a_key_has_no_versions(self, pg_session: Session) -> None:
+        """The normal state for a doctor's own answer."""
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une hernie discale ?",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+        )
+        ArticleController.review(article.id, approve=True)
+
+        assert ArticleController.get(article.id).topic_key is None
+        assert ArticleController.get(article.id).translations == []
+
+    def test_the_public_read_carries_the_versions_too(self, pg_session: Session) -> None:
+        """The blog reads by slug, not by id."""
+        fr_id, ar_id = self._pair()
+        ArticleController.review(fr_id, approve=True)
+        ArticleController.review(ar_id, approve=True)
+        slug = ArticleController.get(fr_id).slug
+
+        public = ArticleController.get_published(slug)
+
+        assert public.topic_key == "diabetes-beach"
+        assert [t.locale for t in public.translations] == ["ar"]
+
+    def test_a_key_can_be_set_on_an_article_already_published(self, pg_session: Session) -> None:
+        """The pairing arrived after the articles did. Republishing them would
+        change their slugs and break every link already crawled."""
+        fr = ArticleController.write_from_sources(
+            title="Coup de soleil avec des cloques",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+        )
+        ar = ArticleController.write_from_sources(
+            title="ضربة شمس مع فقاعات",
+            body=BODY,
+            sources=self.SOURCES,
+            locale="ar",
+        )
+        ArticleController.review(fr.id, approve=True)
+        ArticleController.review(ar.id, approve=True)
+        before = ArticleController.get(fr.id).slug
+
+        ArticleController.set_topic_key(fr.id, "sunburn")
+        ArticleController.set_topic_key(ar.id, "sunburn")
+
+        linked = ArticleController.get(fr.id)
+        assert linked.slug == before
+        assert [t.locale for t in linked.translations] == ["ar"]
+
+    def test_clearing_the_key_unlinks_them(self, pg_session: Session) -> None:
+        fr_id, ar_id = self._pair()
+        ArticleController.review(fr_id, approve=True)
+        ArticleController.review(ar_id, approve=True)
+
+        ArticleController.set_topic_key(ar_id, None)
+
+        assert ArticleController.get(fr_id).translations == []
+        assert ArticleController.get(ar_id).topic_key is None

@@ -112,6 +112,19 @@ class ArticleTraffic(DomainModel):
     from_facebook: int
 
 
+class TranslationRef(DomainModel):
+    """The same answer, published in another language.
+
+    Title as well as slug: a language switch that shows only a language code
+    asks the reader to trust that the other page is the same article. Showing
+    its title lets them see that it is.
+    """
+
+    locale: str
+    slug: str
+    title: str
+
+
 class ArticleView(DomainModel):
     """One answer, with the byline a reader needs to weigh it."""
 
@@ -121,6 +134,8 @@ class ArticleView(DomainModel):
     summary: str | None
     body: str
     locale: str
+    # Groups the versions of one answer written in different languages.
+    topic_key: str | None = None
     specialty_slug: str | None
     status: str
     published_at: datetime | None
@@ -138,6 +153,9 @@ class ArticleView(DomainModel):
 
     sources: list[SourceRef] = []
     images: list[ImageRef] = []
+    # Other published languages of this same answer. Empty unless the article
+    # carries a topic key and a counterpart is published.
+    translations: list[TranslationRef] = []
     validations: list[ValidatorRef] = []
 
     # How readers answered "did this help you?". Shown on the page, but the
@@ -240,10 +258,32 @@ def _images(raw) -> list[ImageRef]:  # noqa: ANN001
     ]
 
 
+def _translations_for(session, article) -> list[TranslationRef]:  # noqa: ANN001
+    """The same answer in other languages, published only.
+
+    A draft counterpart must not be linked: the switch would hand a reader a
+    404. Restricted to PUBLISHED for the same reason the public read is.
+    """
+    topic_key = getattr(article, "topic_key", None)
+    if not topic_key:
+        return []
+    rows = session.execute(
+        select(Article.locale, Article.slug, Article.title)
+        .where(
+            Article.topic_key == topic_key,
+            Article.id != article.id,
+            Article.status == ArticleStatus.PUBLISHED,
+        )
+        .order_by(Article.locale.asc())
+    ).all()
+    return [TranslationRef(locale=r.locale, slug=r.slug, title=r.title) for r in rows]
+
+
 def _view(
     row,  # noqa: ANN001
     validations: list[ValidatorRef] | None = None,
     votes: tuple[int, int] = (0, 0),
+    translations: list[TranslationRef] | None = None,
 ) -> ArticleView:
     return ArticleView(
         id=row.id,
@@ -252,6 +292,7 @@ def _view(
         summary=row.summary,
         body=row.body,
         locale=row.locale,
+        topic_key=getattr(row, "topic_key", None),
         specialty_slug=row.specialty_slug,
         status=str(row.status),
         published_at=row.published_at,
@@ -263,6 +304,7 @@ def _view(
         sources=_sources(getattr(row, "sources", None)),
         images=_images(getattr(row, "images", None)),
         validations=validations or [],
+        translations=translations or [],
         helpful_votes=votes[0],
         total_votes=votes[1],
     )
@@ -275,6 +317,7 @@ _SELECT = select(
     Article.summary,
     Article.body,
     Article.locale,
+    Article.topic_key,
     Article.specialty_slug,
     Article.status,
     Article.published_at,
@@ -403,6 +446,7 @@ class ArticleController:
         locale: str = "ar",
         specialty_slug: str | None = None,
         images: list[dict] | None = None,
+        topic_key: str | None = None,
     ) -> ArticleView:
         """Create a draft the platform wrote from the literature.
 
@@ -435,6 +479,7 @@ class ArticleController:
                 summary=(summary or "").strip() or None,
                 body=body.strip(),
                 locale=locale,
+                topic_key=(topic_key or "").strip() or None,
                 specialty_slug=specialty_slug,
                 sources=cited,
                 images=[i for i in (images or []) if isinstance(i, dict)],
@@ -444,6 +489,22 @@ class ArticleController:
             session.flush()
             article_id = article.id
 
+        return ArticleController.get(article_id)
+
+    @staticmethod
+    def set_topic_key(article_id: int, topic_key: str | None) -> ArticleView:
+        """Group an already-published article with its other languages.
+
+        Needed because the pairing was introduced after the articles were: the
+        alternative is republishing them, which would change their slugs and
+        break every link already crawled.
+        """
+        with get_session() as session:
+            article = session.get(Article, article_id)
+            if article is None:
+                raise SehatyNotFoundError(f"no article {article_id}")
+            article.topic_key = (topic_key or "").strip() or None
+            session.flush()
         return ArticleController.get(article_id)
 
     @staticmethod
@@ -711,7 +772,8 @@ class ArticleController:
                 raise SehatyNotFoundError(f"no article {article_id}")
             signed = _validations_for(session, [row.id])
             votes = _votes_for(session, [row.id])
-        return _view(row, signed.get(row.id), votes.get(row.id, (0, 0)))
+            others = _translations_for(session, row)
+        return _view(row, signed.get(row.id), votes.get(row.id, (0, 0)), others)
 
     @staticmethod
     def get_published(slug: str) -> ArticleView:
@@ -724,7 +786,8 @@ class ArticleController:
                 raise SehatyNotFoundError(f"no published article {slug!r}")
             signed = _validations_for(session, [row.id])
             votes = _votes_for(session, [row.id])
-        return _view(row, signed.get(row.id), votes.get(row.id, (0, 0)))
+            others = _translations_for(session, row)
+        return _view(row, signed.get(row.id), votes.get(row.id, (0, 0)), others)
 
     @staticmethod
     def list_published(
