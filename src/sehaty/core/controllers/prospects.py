@@ -71,7 +71,7 @@ class ProspectRow(DomainModel):
     plan: str
     booking_enabled: bool
     subscription_status: str | None
-    # The 500 MAD Pack Présence: their own services, photos and copy.
+    # The 600 MAD Pack Présence: their own services, photos and copy.
     is_personalized: bool
 
     # What to type into Maps. Prefers coordinates, falls back to the written
