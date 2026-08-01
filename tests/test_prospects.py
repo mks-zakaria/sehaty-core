@@ -14,6 +14,7 @@ import pytest
 from geoalchemy2.elements import WKTElement
 from sehaty.db import (
     ClaimStatus,
+    DoctorLanding,
     DoctorProfile,
     GeoPrecision,
     Plan,
@@ -47,6 +48,8 @@ def _doctor(
     source: ProfileSource = ProfileSource.IMPORT,
     geo: bool = False,
     subscribed: bool = False,
+    status: SubscriptionStatus = SubscriptionStatus.ACTIVE,
+    period_end: datetime | None = None,
 ) -> int:
     user = User(email=email, role=UserRole.DOCTOR, is_active=True)
     session.add(user)
@@ -77,9 +80,9 @@ def _doctor(
             Subscription(
                 doctor_id=user.id,
                 plan_id=plan.id,
-                status=SubscriptionStatus.ACTIVE,
+                status=status,
                 current_period_start=NOW - timedelta(days=1),
-                current_period_end=NOW + timedelta(days=30),
+                current_period_end=period_end or NOW + timedelta(days=30),
             )
         )
         session.commit()
@@ -154,6 +157,98 @@ class TestProspectBoard:
         assert row.plan == PLAN_LANDING_RDV
         assert row.onboarded is True
         assert board.paying == 1
+        assert board.trialing == 0
+
+    def test_a_doctor_on_the_free_trial_is_not_counted_as_paying(self, pg_session: Session) -> None:
+        """Flipping the RDV switch on at the desk opens a 90-day trial.
+
+        The agenda works, so the row is on the RDV plan — but nobody has paid,
+        and a header that says otherwise reports revenue that does not exist.
+        """
+        _doctor(
+            pg_session,
+            email="trial@c.ma",
+            slug="dr-trial",
+            district="Maârif",
+            claim=ClaimStatus.CLAIMED,
+            subscribed=True,
+            status=SubscriptionStatus.TRIALING,
+        )
+
+        board = ProspectController.board(now=NOW)
+
+        (row,) = board.rows
+        assert row.plan == PLAN_LANDING_RDV
+        assert row.booking_enabled is True
+        assert board.paying == 0
+        assert board.trialing == 1
+
+    def test_a_lapsed_subscription_stops_counting_as_revenue(self, pg_session: Session) -> None:
+        """Still ACTIVE in the table, but the paid period ran out in June."""
+        _doctor(
+            pg_session,
+            email="lapsed@c.ma",
+            slug="dr-lapsed",
+            district="Maârif",
+            claim=ClaimStatus.CLAIMED,
+            subscribed=True,
+            period_end=NOW - timedelta(days=45),
+        )
+
+        board = ProspectController.board(now=NOW)
+
+        assert board.paying == 0
+        assert board.trialing == 0
+
+    def test_the_counters_describe_the_directory_not_the_filtered_page(
+        self, pg_session: Session
+    ) -> None:
+        """Filtering to the doctors still to visit must not zero the header.
+
+        That filter is how the list is worked, so it is exactly when the founder
+        is looking at the counters.
+        """
+        _doctor(pg_session, email="cold@c.ma", slug="dr-cold", district="Errahma")
+        _doctor(
+            pg_session,
+            email="won@c.ma",
+            slug="dr-won",
+            district="Maârif",
+            claim=ClaimStatus.VERIFIED,
+            subscribed=True,
+        )
+
+        board = ProspectController.board(onboarded=False, now=NOW)
+
+        assert board.shown == 1
+        assert [r.slug for r in board.rows] == ["dr-cold"]
+        assert board.total == 2
+        assert board.onboarded == 1
+        assert board.paying == 1
+
+    def test_the_presence_pack_is_counted_even_without_an_agenda(self, pg_session: Session) -> None:
+        """Pack Présence is a one-off sale; it has nothing to do with booking.
+
+        Counted separately or the board shows a doctor who paid 600 MAD sitting
+        in the same bucket as one who has paid nothing.
+        """
+        doctor_id = _doctor(
+            pg_session,
+            email="presence@c.ma",
+            slug="dr-presence",
+            district="Errahma",
+            claim=ClaimStatus.CLAIMED,
+        )
+        pg_session.add(DoctorLanding(doctor_id=doctor_id, is_personalized=True))
+        pg_session.commit()
+
+        board = ProspectController.board(now=NOW)
+
+        (row,) = board.rows
+        assert row.is_personalized is True
+        assert row.plan == PLAN_LANDING
+        assert board.presence == 1
+        assert board.paying == 0
 
     def test_a_delisted_doctor_never_appears(self, pg_session: Session) -> None:
         """A removal is a tombstone; it must not resurface as a prospect."""
