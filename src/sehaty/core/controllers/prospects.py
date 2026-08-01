@@ -30,6 +30,8 @@ from sehaty.db import (
     DoctorSpecialty,
     GeoPrecision,
     Specialty,
+    Subscription,
+    SubscriptionStatus,
 )
 from sqlalchemy import cast, func, select
 
@@ -83,12 +85,46 @@ class ProspectRow(DomainModel):
 
 
 class ProspectBoard(DomainModel):
+    """The rows to work, plus the counters that say where the business stands.
+
+    The counters describe the whole city/district scope — not the filtered page.
+    Filtering to "not onboarded yet" is how the list is *worked*; if the header
+    followed the filter it would read "0 onboarded" at precisely the moment the
+    operator is looking at everyone still to visit.
+    """
+
     rows: list[ProspectRow]
+    # Rows on this page: after the onboarded/plan filters and the row limit.
+    shown: int
+    # Doctors in scope, before those filters and before the limit.
     total: int
     onboarded: int
+    # Money actually arriving: a live ACTIVE subscription. A trial is not a sale
+    # and must never be counted as one — the whole point of the number is to say
+    # how far off 10 000 MAD/month we are.
     paying: int
+    # On the free 90-day trial. Flipping a doctor's RDV switch on at the desk
+    # starts one, so this is the follow-up list: they are using the agenda and
+    # have not been asked for money yet.
+    trialing: int
+    # Bought the Pack Présence. Independent of the agenda: it is a one-off, so a
+    # doctor can be presence-paid and still show up as not paying monthly.
+    presence: int
     # Districts present in the result, for the filter chips.
     districts: list[str]
+
+
+def _lapsed(period_end: datetime | None, now: datetime) -> bool:
+    """True once the paid period has run out.
+
+    An ACTIVE row whose period ended and was never renewed is not revenue; it is
+    someone who stopped paying and whose status nobody has moved yet.
+    """
+    if period_end is None:
+        return False
+    if period_end.tzinfo is None:
+        period_end = period_end.replace(tzinfo=UTC)
+    return period_end < now
 
 
 def _maps_query(row) -> str:  # noqa: ANN001
@@ -161,8 +197,57 @@ class ProspectController:
         if district:
             stmt = stmt.where(DoctorProfile.district == district)
 
+        # The counters answer "where does the business stand", so they are taken
+        # over the whole city/district scope rather than over the page of rows:
+        # unaffected by the onboarded/plan filters, and never truncated by the
+        # limit the way a count of returned rows would be.
+        scope = select(DoctorProfile.user_id).where(
+            DoctorProfile.claim_status != ClaimStatus.REMOVAL_REQUESTED
+        )
+        if city:
+            scope = scope.where(DoctorProfile.city == city)
+        if district:
+            scope = scope.where(DoctorProfile.district == district)
+
+        directory = (
+            select(
+                func.count(),
+                func.count().filter(
+                    DoctorProfile.claim_status.in_([ClaimStatus.CLAIMED, ClaimStatus.VERIFIED])
+                ),
+                func.count().filter(DoctorLanding.is_personalized.is_(True)),
+            )
+            .select_from(DoctorProfile)
+            .outerjoin(DoctorLanding, DoctorLanding.doctor_id == DoctorProfile.user_id)
+            .where(DoctorProfile.user_id.in_(scope))
+        )
+
+        # One row per doctor, their most recent subscription — the same one
+        # `entitlement_for` resolves, so the header and the rows cannot disagree.
+        latest_subscription = (
+            select(
+                Subscription.doctor_id,
+                Subscription.status,
+                Subscription.current_period_end,
+            )
+            .where(Subscription.doctor_id.in_(scope))
+            .order_by(Subscription.doctor_id, Subscription.current_period_end.desc())
+            .distinct(Subscription.doctor_id)
+        )
+
         with get_session() as session:
             records = session.execute(stmt).all()
+            total, onboarded_count, presence_count = session.execute(directory).one()
+            subscriptions = session.execute(latest_subscription).all()
+
+        paying = trialing = 0
+        for subscription in subscriptions:
+            if _lapsed(subscription.current_period_end, now):
+                continue
+            if subscription.status == SubscriptionStatus.ACTIVE:
+                paying += 1
+            elif subscription.status == SubscriptionStatus.TRIALING:
+                trialing += 1
 
         rows: list[ProspectRow] = []
         for record in records:
@@ -206,8 +291,11 @@ class ProspectController:
 
         return ProspectBoard(
             rows=rows,
-            total=len(rows),
-            onboarded=sum(1 for r in rows if r.onboarded),
-            paying=sum(1 for r in rows if r.plan == PLAN_LANDING_RDV),
+            shown=len(rows),
+            total=total,
+            onboarded=onboarded_count,
+            paying=paying,
+            trialing=trialing,
+            presence=presence_count,
             districts=sorted({r.district for r in rows if r.district}),
         )
