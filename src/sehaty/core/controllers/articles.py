@@ -139,6 +139,8 @@ class ArticleView(DomainModel):
     specialty_slug: str | None
     status: str
     published_at: datetime | None
+    # Set on a draft that is queued to publish itself. None on everything else.
+    scheduled_for: datetime | None = None
     review_note: str | None
 
     # None when the platform wrote it from the literature rather than a doctor
@@ -296,6 +298,7 @@ def _view(
         specialty_slug=row.specialty_slug,
         status=str(row.status),
         published_at=row.published_at,
+        scheduled_for=getattr(row, "scheduled_for", None),
         review_note=row.review_note,
         author_id=row.author_id,
         author_name=getattr(row, "full_name", None),
@@ -321,6 +324,7 @@ _SELECT = select(
     Article.specialty_slug,
     Article.status,
     Article.published_at,
+    Article.scheduled_for,
     Article.review_note,
     Article.author_id,
     Article.sources,
@@ -447,6 +451,7 @@ class ArticleController:
         specialty_slug: str | None = None,
         images: list[dict] | None = None,
         topic_key: str | None = None,
+        scheduled_for: datetime | None = None,
     ) -> ArticleView:
         """Create a draft the platform wrote from the literature.
 
@@ -480,6 +485,7 @@ class ArticleController:
                 body=body.strip(),
                 locale=locale,
                 topic_key=(topic_key or "").strip() or None,
+                scheduled_for=scheduled_for,
                 specialty_slug=specialty_slug,
                 sources=cited,
                 images=[i for i in (images or []) if isinstance(i, dict)],
@@ -490,6 +496,91 @@ class ArticleController:
             article_id = article.id
 
         return ArticleController.get(article_id)
+
+    @staticmethod
+    def schedule(article_id: int, when: datetime | None) -> ArticleView:
+        """Queue a draft to publish itself, or take it back off the queue.
+
+        Refuses an article that is already published: the date would say it is
+        waiting when it is not, and the sweep skips it anyway. Refuses a
+        rejection outright — a piece turned down for being wrong must not become
+        public because a clock came round.
+        """
+        with get_session() as session:
+            article = session.get(Article, article_id)
+            if article is None:
+                raise SehatyNotFoundError(f"no article {article_id}")
+            if when is not None and article.status == ArticleStatus.PUBLISHED:
+                raise SehatyValidationError("that article is already published")
+            if when is not None and article.status == ArticleStatus.REJECTED:
+                raise SehatyValidationError("a rejected article cannot be scheduled")
+            article.scheduled_for = when
+            session.flush()
+        return ArticleController.get(article_id)
+
+    @staticmethod
+    def list_scheduled(limit: int = 100) -> list[ArticleView]:
+        """What is queued, soonest first — the editorial calendar."""
+        with get_session() as session:
+            rows = session.execute(
+                _SELECT.where(
+                    Article.scheduled_for.is_not(None),
+                    Article.status != ArticleStatus.PUBLISHED,
+                )
+                .order_by(Article.scheduled_for.asc())
+                .limit(limit)
+            ).all()
+            signed = _validations_for(session, [r.id for r in rows])
+            votes = _votes_for(session, [r.id for r in rows])
+        return [_view(r, signed.get(r.id), votes.get(r.id, (0, 0))) for r in rows]
+
+    @staticmethod
+    def publish_due(*, now: datetime | None = None, limit: int = 50) -> list[ArticleView]:
+        """Publish every draft whose time has come. Returns what went live.
+
+        The sweep the scheduler runs. Three things it deliberately does not do:
+
+        It never touches a draft with no date — that draft is unfinished, not
+        waiting, and the difference is the only thing standing between a
+        scheduler and a machine that publishes whatever it finds.
+
+        It never resurrects a rejection. A piece turned down for being wrong
+        stays down whatever its date says.
+
+        It clears the date as it publishes, so a replay cannot republish and
+        move an article's publication date forward — which would present old
+        writing to a reader, and to a crawler, as new.
+        """
+        now = now or datetime.now(UTC)
+        with get_session() as session:
+            due = (
+                session.execute(
+                    select(Article.id)
+                    .where(
+                        Article.scheduled_for.is_not(None),
+                        Article.scheduled_for <= now,
+                        Article.status.in_([ArticleStatus.DRAFT, ArticleStatus.PENDING]),
+                    )
+                    .order_by(Article.scheduled_for.asc())
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+
+        published: list[ArticleView] = []
+        for article_id in due:
+            with get_session() as session:
+                article = session.get(Article, article_id)
+                if article is None:  # pragma: no cover - deleted mid-sweep
+                    continue
+                article.status = ArticleStatus.PUBLISHED
+                article.published_at = article.published_at or now
+                article.review_note = None
+                article.scheduled_for = None
+                session.flush()
+            published.append(ArticleController.get(article_id))
+        return published
 
     @staticmethod
     def set_topic_key(article_id: int, topic_key: str | None) -> ArticleView:
