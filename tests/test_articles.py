@@ -10,7 +10,7 @@ to publish into an onboarding.
 """
 
 import unicodedata
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sehaty.db import (
@@ -629,3 +629,136 @@ class TestLanguageVersions:
 
         assert ArticleController.get(fr_id).translations == []
         assert ArticleController.get(ar_id).topic_key is None
+
+
+@pytest.mark.usefixtures("_pg_engine")
+class TestScheduling:
+    """Publishing on a date, without a human awake to press the button.
+
+    The scheduler's whole safety property is that opting in is explicit: a
+    draft with a date is queued, a draft without one is unfinished. Most of
+    what follows tests the things the sweep must refuse to do.
+    """
+
+    SOURCES = [{"work": "Pathology Illustrated (7th ed.), Reid et al.", "locator": "p. 315"}]
+    SOON = NOW + timedelta(hours=1)
+    PAST = NOW - timedelta(hours=1)
+
+    def _draft(self, *, title: str = "C'est quoi une hernie discale ?", when=None):
+        return ArticleController.write_from_sources(
+            title=title,
+            body=BODY,
+            sources=self.SOURCES,
+            locale="fr",
+            scheduled_for=when,
+        )
+
+    def test_a_draft_whose_time_has_come_publishes(self, pg_session: Session) -> None:
+        article = self._draft(when=self.PAST)
+        assert ArticleController.get(article.id).status == str(ArticleStatus.DRAFT)
+
+        published = ArticleController.publish_due(now=NOW)
+
+        assert [a.id for a in published] == [article.id]
+        after = ArticleController.get(article.id)
+        assert after.status == str(ArticleStatus.PUBLISHED)
+        assert after.published_at is not None
+
+    def test_a_draft_still_waiting_is_left_alone(self, pg_session: Session) -> None:
+        article = self._draft(when=self.SOON)
+
+        assert ArticleController.publish_due(now=NOW) == []
+        assert ArticleController.get(article.id).status == str(ArticleStatus.DRAFT)
+
+    def test_an_undated_draft_is_never_swept_up(self, pg_session: Session) -> None:
+        """The property the whole design rests on.
+
+        An unfinished draft and a scheduled one are both DRAFT. Only the date
+        separates them, so a sweep that ignored it would publish everything
+        anyone had ever started writing.
+        """
+        article = self._draft(when=None)
+
+        assert ArticleController.publish_due(now=NOW) == []
+        assert ArticleController.get(article.id).status == str(ArticleStatus.DRAFT)
+
+    def test_a_rejection_is_never_resurrected_by_the_clock(self, pg_session: Session) -> None:
+        article = self._draft(when=self.PAST)
+        ArticleController.review(article.id, approve=False, note="Contredit la source.")
+
+        assert ArticleController.publish_due(now=NOW) == []
+        assert ArticleController.get(article.id).status == str(ArticleStatus.REJECTED)
+
+    def test_a_rejected_article_cannot_be_scheduled(self, pg_session: Session) -> None:
+        article = self._draft()
+        ArticleController.review(article.id, approve=False, note="Faux.")
+
+        with pytest.raises(SehatyValidationError):
+            ArticleController.schedule(article.id, self.SOON)
+
+    def test_scheduling_something_already_public_is_refused(self, pg_session: Session) -> None:
+        """The date would claim it is waiting when it is already out."""
+        article = self._draft()
+        ArticleController.review(article.id, approve=True)
+
+        with pytest.raises(SehatyValidationError):
+            ArticleController.schedule(article.id, self.SOON)
+
+    def test_the_sweep_does_not_move_a_publication_date(self, pg_session: Session) -> None:
+        """Running twice must not present old writing as new.
+
+        `published_at` is what a reader and a crawler read as the date. Letting
+        a replay refresh it would redate the whole archive.
+        """
+        article = self._draft(when=self.PAST)
+        ArticleController.publish_due(now=NOW)
+        first = ArticleController.get(article.id).published_at
+
+        again = ArticleController.publish_due(now=NOW + timedelta(days=3))
+
+        assert again == []
+        assert ArticleController.get(article.id).published_at == first
+
+    def test_a_schedule_can_be_called_off(self, pg_session: Session) -> None:
+        article = self._draft(when=self.PAST)
+
+        ArticleController.schedule(article.id, None)
+
+        assert ArticleController.get(article.id).scheduled_for is None
+        assert ArticleController.publish_due(now=NOW) == []
+
+    def test_the_queue_reads_soonest_first(self, pg_session: Session) -> None:
+        later = self._draft(title="Le diabète : comment savoir ?", when=NOW + timedelta(days=7))
+        sooner = self._draft(title="La fatigue permanente ?", when=NOW + timedelta(days=1))
+
+        queued = ArticleController.list_scheduled()
+
+        assert [a.id for a in queued] == [sooner.id, later.id]
+
+    def test_what_is_already_out_is_not_in_the_queue(self, pg_session: Session) -> None:
+        article = self._draft(when=self.PAST)
+        ArticleController.publish_due(now=NOW)
+
+        assert [a.id for a in ArticleController.list_scheduled()] == []
+        assert ArticleController.get(article.id).scheduled_for is None
+
+    def test_a_batch_is_published_in_the_order_it_was_queued(self, pg_session: Session) -> None:
+        first = self._draft(title="Première question ?", when=NOW - timedelta(days=2))
+        second = self._draft(title="Deuxième question ?", when=NOW - timedelta(days=1))
+
+        published = ArticleController.publish_due(now=NOW)
+
+        assert [a.id for a in published] == [first.id, second.id]
+
+    def test_one_sweep_takes_only_its_share(self, pg_session: Session) -> None:
+        """A backlog is worked through over several runs rather than in one.
+
+        Publishing forty articles in one minute reads as a dump to a crawler
+        and to a reader; the cap makes a backlog drain steadily instead.
+        """
+        for i in range(4):
+            self._draft(title=f"Question numéro {i} ?", when=self.PAST)
+
+        assert len(ArticleController.publish_due(now=NOW, limit=2)) == 2
+        assert len(ArticleController.publish_due(now=NOW, limit=2)) == 2
+        assert ArticleController.publish_due(now=NOW, limit=2) == []
