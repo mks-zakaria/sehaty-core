@@ -709,7 +709,10 @@ class ArticleController:
                 if not (note or "").strip():
                     raise SehatyValidationError("a rejection needs a reason")
                 article.status = ArticleStatus.REJECTED
-                article.review_note = note.strip()
+                # The guard above already rejected an empty note; mypy cannot
+                # see that through `(note or "")`, and narrowing it here is
+                # cheaper than restating the check.
+                article.review_note = (note or "").strip()
             session.flush()
         return ArticleController.get(article_id)
 
@@ -908,6 +911,135 @@ class ArticleController:
             signed = _validations_for(session, [r.id for r in rows])
             votes = _votes_for(session, [r.id for r in rows])
         return [_view(r, signed.get(r.id), votes.get(r.id, (0, 0))) for r in rows]
+
+    @staticmethod
+    def list_admin(
+        *,
+        status: str | None = None,
+        locale: str | None = None,
+        specialty_slug: str | None = None,
+        search: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ArticleView]:
+        """Every article an admin can act on, newest first.
+
+        `list_pending` answers one question — what is waiting on a human. An
+        editor needs the other one: everything, filterable. Newest first,
+        because the thing you just wrote is the thing you are looking for.
+        """
+        query = _SELECT
+        if status:
+            query = query.where(Article.status == ArticleStatus(status))
+        if locale:
+            query = query.where(Article.locale == locale)
+        if specialty_slug:
+            query = query.where(Article.specialty_slug == specialty_slug)
+        if search and search.strip():
+            like = f"%{search.strip()}%"
+            query = query.where(Article.title.ilike(like) | Article.body.ilike(like))
+
+        with get_session() as session:
+            rows = session.execute(
+                query.order_by(Article.id.desc()).limit(limit).offset(offset)
+            ).all()
+            signed = _validations_for(session, [r.id for r in rows])
+            votes = _votes_for(session, [r.id for r in rows])
+        return [_view(r, signed.get(r.id), votes.get(r.id, (0, 0))) for r in rows]
+
+    @staticmethod
+    def edit(
+        article_id: int,
+        *,
+        title: str | None = None,
+        summary: str | None = None,
+        body: str | None = None,
+        locale: str | None = None,
+        specialty_slug: str | None = None,
+        images: list[dict] | None = None,
+        sources: list[dict] | None = None,
+        topic_key: str | None = None,
+    ) -> ArticleView:
+        """Change an article. Only the fields passed are touched.
+
+        **Editing the body discards the doctors' validations.** A doctor put
+        their name to particular words; once those words change their signature
+        vouches for text they never read, and they are the one person who cannot
+        find that out. Losing a validation is an inconvenience, and it is the
+        cheaper of the two mistakes.
+
+        The article stays published if it was published — silently pulling live
+        content offline is a surprise of its own — but it renders with no
+        reviewer until someone signs it again, which is the truth.
+
+        The slug never changes. It is printed on brochures and indexed by search
+        engines, so a title corrected for a typo must not move the page.
+        """
+        with get_session() as session:
+            article = session.get(Article, article_id)
+            if article is None:
+                raise SehatyNotFoundError(f"no article {article_id}")
+
+            if title is not None or body is not None or locale is not None:
+                _check_text(
+                    title=title if title is not None else article.title,
+                    body=body if body is not None else article.body,
+                    locale=locale if locale is not None else article.locale,
+                )
+
+            body_changed = body is not None and body.strip() != article.body
+            if title is not None:
+                article.title = title.strip()
+            if summary is not None:
+                article.summary = summary.strip() or None
+            if body is not None:
+                article.body = body.strip()
+            if locale is not None:
+                article.locale = locale
+            if specialty_slug is not None:
+                article.specialty_slug = specialty_slug or None
+            if topic_key is not None:
+                article.topic_key = topic_key.strip() or None
+            if images is not None:
+                article.images = [i for i in images if isinstance(i, dict)]
+            if sources is not None:
+                cited = [
+                    {"work": str(s["work"]).strip(), "locator": (s.get("locator") or None)}
+                    for s in sources
+                    if isinstance(s, dict) and str(s.get("work", "")).strip()
+                ]
+                if not cited and article.author_id is None:
+                    raise SehatyValidationError(
+                        "a platform-written article must cite at least one source"
+                    )
+                article.sources = cited
+
+            if body_changed:
+                session.query(ArticleValidation).filter(
+                    ArticleValidation.article_id == article_id
+                ).delete(synchronize_session=False)
+
+            session.flush()
+
+        return ArticleController.get(article_id)
+
+    @staticmethod
+    def delete(article_id: int) -> None:
+        """Remove an article and the validations attached to it.
+
+        A published article's URL may be indexed and linked; deleting it turns
+        that into a 404 rather than anything a reader can act on. That is the
+        caller's decision to make rather than this function's to refuse, but it
+        is worth knowing before making it.
+        """
+        with get_session() as session:
+            article = session.get(Article, article_id)
+            if article is None:
+                raise SehatyNotFoundError(f"no article {article_id}")
+            session.query(ArticleValidation).filter(
+                ArticleValidation.article_id == article_id
+            ).delete(synchronize_session=False)
+            session.delete(article)
 
     @staticmethod
     def list_pending(limit: int = 100) -> list[ArticleView]:
