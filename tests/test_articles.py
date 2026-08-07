@@ -273,6 +273,60 @@ class TestPlatformWritten:
                 locale="fr",
             )
 
+    def test_editing_the_body_discards_the_signatures(self, pg_session: Session) -> None:
+        """A doctor signed particular words. Change them and the signature is a lie.
+
+        They are the one person who cannot discover this happened, which is why
+        it is dropped rather than flagged.
+        """
+        uid = _doctor(
+            pg_session, email="edit@c.ma", slug="dr-edit-casa", claim=ClaimStatus.CLAIMED
+        )
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une sciatique ?", body=BODY, sources=self.SOURCES, locale="fr"
+        )
+        signed = ArticleController.validate(article.id, uid)
+        assert len(signed.validations) == 1
+
+        edited = ArticleController.edit(article.id, body=BODY.replace("Oui", "Non"))
+
+        assert edited.validations == []
+
+    def test_editing_only_the_title_keeps_the_signatures(self, pg_session: Session) -> None:
+        """Fixing a typo is not a new article, and must not cost a doctor's name."""
+        uid = _doctor(
+            pg_session, email="typo@c.ma", slug="dr-typo-casa", claim=ClaimStatus.CLAIMED
+        )
+        article = ArticleController.write_from_sources(
+            title="C'est quoi une sciatiqe ?", body=BODY, sources=self.SOURCES, locale="fr"
+        )
+        ArticleController.validate(article.id, uid)
+
+        edited = ArticleController.edit(article.id, title="C'est quoi une sciatique ?")
+
+        assert edited.title == "C'est quoi une sciatique ?"
+        assert len(edited.validations) == 1
+
+    def test_the_slug_survives_a_retitle(self, pg_session: Session) -> None:
+        """It is printed on brochures and indexed; a typo fix must not move the page."""
+        article = ArticleController.write_from_sources(
+            title="Le glaucome fait-il mal ?", body=BODY, sources=self.SOURCES, locale="fr"
+        )
+
+        edited = ArticleController.edit(article.id, title="Le glaucome fait-il vraiment mal ?")
+
+        assert edited.slug == article.slug
+
+    def test_delete_removes_the_article(self, pg_session: Session) -> None:
+        article = ArticleController.write_from_sources(
+            title="Une question à supprimer", body=BODY, sources=self.SOURCES, locale="fr"
+        )
+
+        ArticleController.delete(article.id)
+
+        with pytest.raises(SehatyNotFoundError):
+            ArticleController.get(article.id)
+
     def test_a_validating_doctor_becomes_the_byline(self, pg_session: Session) -> None:
         """The link back to their page is the whole consideration."""
         uid = _doctor(
